@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DeepInsight-SQL</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">
+          <span class="db-cylinder"></span>
+          <span class="search-circle"></span>
+          <span class="search-line"></span>
+        </div>
+        <div class="brand-name">Deep-<br />Insight-SQL</div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <section class="history-section">
+        <div class="section-title">
+          <div class="title-left">
+            <span class="history-icon">↻</span>
+            <span>历史报告</span>
+          </div>
+          <span class="collapse-icon">⌃</span>
+        </div>
+
+        <div class="history-list" id="historyList">
+          <div class="history-empty">暂无分析任务</div>
+        </div>
+      </section>
+
+      <button class="connect-entry" id="openDbModalBtn">
+        <span class="database-icon">◎</span>
+        <span>连接数据库</span>
+        <span class="entry-arrow">›</span>
+      </button>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <div></div>
+        <nav class="top-actions" aria-label="顶部工具栏">
+          <button class="icon-button notification" aria-label="通知">♧</button>
+          <button class="icon-button" aria-label="帮助">?</button>
+          <button class="user-avatar" aria-label="用户头像">U</button>
+          <button class="drop-button" aria-label="展开用户菜单">⌄</button>
+        </nav>
+      </header>
+
+      <section class="hero-section">
+        <div class="decor decor-pie">
+          <div class="pie-inner"></div>
+        </div>
+        <div class="decor decor-bars">
+          <span></span><span></span><span></span><span></span>
+        </div>
+        <div class="decor decor-dots" aria-hidden="true"></div>
+
+        <div class="hero-copy">
+          <h1>智能数据洞察，轻松洞见价值</h1>
+          <p>通过自然语言描述您的分析需求，DeepInsight-SQL 将为您生成精准的 SQL 并提供深度洞察</p>
+        </div>
+
+        <section class="query-card" aria-label="数据分析输入区域">
+          <div class="textarea-wrap">
+            <textarea
+              id="queryInput"
+              maxlength="2000"
+              placeholder="请输入你的数据分析需求..."
+            ></textarea>
+            <span class="counter" id="charCounter">0 / 2000</span>
+          </div>
+
+          <div class="query-bottom">
+            <label class="db-select-group" for="databaseSelect">
+              <span class="field-label">选择数据库</span>
+              <div class="select-shell">
+                <span class="select-icon">◎</span>
+                <select id="databaseSelect">
+                  <option value="analytics_db">analytics_db</option>
+                </select>
+              </div>
+            </label>
+
+            <button class="primary-button" id="startAnalyzeBtn">
+              <span>✦</span>
+              <span>开始分析</span>
+            </button>
+          </div>
+        </section>
+      </section>
+
+      <section class="feature-strip" aria-label="平台能力说明">
+        <article class="feature-item">
+          <div class="feature-icon">ϟ</div>
+          <div>
+            <h3>智能生成 SQL</h3>
+            <p>自然语言转 SQL，准确高效</p>
+          </div>
+        </article>
+        <article class="feature-item">
+          <div class="feature-icon">⌁</div>
+          <div>
+            <h3>可视化洞察</h3>
+            <p>自动生成图表，洞察数据趋势</p>
+          </div>
+        </article>
+        <article class="feature-item">
+          <div class="feature-icon">♢</div>
+          <div>
+            <h3>数据安全可靠</h3>
+            <p>只读分析，保障数据安全</p>
+          </div>
+        </article>
+      </section>
+      <section class="task-view hidden" id="taskView" aria-label="任务详情">
+        <div class="task-header">
+          <div>
+            <button class="back-home-button" id="backHomeBtn">← 返回首页</button>
+            <h1 id="taskTitle">任务详情</h1>
+            <p id="taskQuestion">暂无任务问题</p>
+          </div>
+
+          <div class="task-status-card">
+            <span class="task-status-label">当前状态</span>
+            <strong id="taskStatus">-</strong>
+            <span id="taskStage">-</span>
+          </div>
+        </div>
+
+        <div class="task-layout">
+          <section class="task-main-panel">
+            <section class="task-section">
+              <div class="task-section-title">
+                <h2>执行进度</h2>
+                <span id="taskUpdatedAt">-</span>
+              </div>
+              <div class="steps-list" id="stepsList">
+                <div class="empty-block">暂无步骤信息</div>
+              </div>
+            </section>
+
+            <section class="task-section">
+              <div class="task-section-title">
+                <h2>SQL 结果</h2>
+              </div>
+              <pre class="sql-block" id="sqlBlock">暂无 SQL</pre>
+            </section>
+
+            <section class="task-section">
+              <div class="task-section-title">
+                <h2>分析报告</h2>
+              </div>
+              <article class="report-content" id="reportContent">
+                <div class="empty-block">任务完成后将在这里展示 Markdown 报告。</div>
+              </article>
+            </section>
+          </section>
+
+          <aside class="result-side-panel">
+            <div class="result-side-header">
+              <h2>查询数据</h2>
+              <span id="resultRowCount">-</span>
+            </div>
+
+            <div class="result-table-wrap">
+              <table class="result-table" id="resultTable">
+                <thead></thead>
+                <tbody>
+                  <tr>
+                    <td class="empty-table-cell">暂无查询结果</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-mask hidden" id="dbModal" role="dialog" aria-modal="true" aria-labelledby="dbModalTitle">
+    <div class="modal-panel">
+      <div class="modal-header">
+        <div>
+          <h2 id="dbModalTitle">连接数据库</h2>
+          <p>当前通过 FastAPI 后端测试数据库连接。MVP 阶段暂时只真实支持 MySQL。</p>
+        </div>
+        <button class="modal-close" id="closeDbModalBtn" aria-label="关闭弹窗">×</button>
+      </div>
+
+      <form class="db-form" id="dbForm">
+        <div class="form-grid">
+          <label>
+            <span>数据库类型</span>
+            <select id="dbType">
+              <option value="mysql" selected>MySQL</option>
+              <option value="postgresql">PostgreSQL</option>
+              <option value="neo4j">Neo4j</option>
+            </select>
+          </label>
+
+          <label>
+            <span>连接名称</span>
+            <input id="dbAlias" type="text" placeholder="例如 analytics_db" value="analytics_db" />
+          </label>
+
+          <label>
+            <span>主机地址</span>
+            <input id="dbHost" type="text" placeholder="127.0.0.1" value="127.0.0.1" />
+          </label>
+
+          <label>
+            <span>端口</span>
+            <input id="dbPort" type="number" placeholder="3306" value="3306" />
+          </label>
+
+          <label>
+            <span>用户名</span>
+            <input id="dbUser" type="text" placeholder="root" value="root" />
+          </label>
+
+          <label>
+            <span>密码</span>
+            <input id="dbPassword" type="password" placeholder="请输入数据库密码" />
+          </label>
+
+          <label class="full-field">
+            <span>数据库名</span>
+            <input id="dbName" type="text" placeholder="例如 demo_data" value="demo_data" />
+          </label>
+        </div>
+
+        <div class="modal-status" id="dbStatus">未连接</div>
+
+        <div class="modal-actions">
+          <button type="button" class="ghost-button" id="testDbBtn">测试连接</button>
+          <button type="submit" class="primary-button small">保存连接</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="toast hidden" id="toast"></div>
+
+  <script src="./script.js"></script>
+</body>
+</html>
