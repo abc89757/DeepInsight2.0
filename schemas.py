@@ -20,6 +20,16 @@ class DatabaseConnection(BaseModel):
     database: Optional[str] = Field(default=None, description="数据库名")
 
 
+class DatabaseServerConnection(BaseModel):
+    """用于发现服务器下可用数据库的连接配置。"""
+
+    type: DatabaseType = Field(default="mysql", description="数据库类型")
+    host: str = Field(..., min_length=1, description="数据库主机地址")
+    port: int = Field(..., gt=0, le=65535, description="数据库端口")
+    user: str = Field(..., min_length=1, description="用户名")
+    password: str = Field(default="", description="密码")
+
+
 class TestConnectionResponse(BaseModel):
     """测试数据库连接接口的返回结果。"""
 

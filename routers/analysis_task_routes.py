@@ -9,6 +9,7 @@ from schemas import AnalysisTaskContext, CreateTaskRequest, TaskResponse
 from services.database_service import get_database_connection_by_id, precheck_database_for_task
 from services.task_execution import run_analysis_task_with_persistence
 from services.task_persistence import (
+    delete_task_from_db,
     get_task_detail_from_db,
     insert_database_precheck_step,
     insert_analysis_task,
@@ -95,3 +96,14 @@ def get_tasks() -> Dict[str, Any]:
 def get_task(task_id: str) -> Dict[str, Any]:
     """查询任务详情。"""
     return get_task_detail_from_db(task_id)
+
+
+@router.delete("/tasks_info/{task_id}")
+def delete_task(task_id: str) -> Dict[str, Any]:
+    """删除一个分析任务。"""
+    delete_task_from_db(task_id)
+    return {
+        "success": True,
+        "message": "分析任务已删除",
+        "task_id": task_id,
+    }

@@ -6,10 +6,19 @@ const charCounter = document.getElementById("charCounter");
 const startAnalyzeBtn = document.getElementById("startAnalyzeBtn");
 const databaseSelect = document.getElementById("databaseSelect");
 const openDbModalBtn = document.getElementById("openDbModalBtn");
+const brandHomeBtn = document.getElementById("brandHomeBtn");
 const closeDbModalBtn = document.getElementById("closeDbModalBtn");
 const dbModal = document.getElementById("dbModal");
+const dbModalTitle = document.getElementById("dbModalTitle");
+const dbModalSubtitle = document.getElementById("dbModalSubtitle");
+const dbManageView = document.getElementById("dbManageView");
+const dbFormView = document.getElementById("dbFormView");
+const connectionList = document.getElementById("connectionList");
+const addConnectionBtn = document.getElementById("addConnectionBtn");
+const backToDbListBtn = document.getElementById("backToDbListBtn");
 const dbForm = document.getElementById("dbForm");
 const testDbBtn = document.getElementById("testDbBtn");
+const clearDbFormBtn = document.getElementById("clearDbFormBtn");
 const saveDbBtn = dbForm.querySelector("button[type='submit']");
 const dbStatus = document.getElementById("dbStatus");
 const toast = document.getElementById("toast");
@@ -20,6 +29,7 @@ const dbHost = document.getElementById("dbHost");
 const dbPort = document.getElementById("dbPort");
 const dbUser = document.getElementById("dbUser");
 const dbPassword = document.getElementById("dbPassword");
+const dbNameGroup = document.getElementById("dbNameGroup");
 const dbName = document.getElementById("dbName");
 
 const historyList = document.getElementById("historyList");
@@ -44,7 +54,17 @@ let toastTimer = null;
 let currentTaskId = null;
 let taskPollTimer = null;
 let databaseConnections = [];
+let managedConnections = [];
 const connectionDetailCache = new Map();
+const TRASH_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path d="M3 6h18"></path>
+    <path d="M8 6V4h8v2"></path>
+    <path d="M6.5 6l1 15h9l1-15"></path>
+    <path d="M10 11v6"></path>
+    <path d="M14 11v6"></path>
+  </svg>
+`;
 
 /* =========================
    通用请求函数
@@ -92,6 +112,26 @@ async function postJson(url, body) {
   return data;
 }
 
+async function deleteJson(url) {
+  const response = await fetch(url, {
+    method: "DELETE",
+  });
+
+  let data = null;
+  try {
+    data = await response.json();
+  } catch (error) {
+    throw new Error("后端没有返回合法 JSON");
+  }
+
+  if (!response.ok) {
+    const detail = data && data.detail ? data.detail : `请求失败：${response.status}`;
+    throw new Error(detail);
+  }
+
+  return data;
+}
+
 /* =========================
    数据库连接相关
 ========================= */
@@ -110,13 +150,25 @@ function getSelectedConnection() {
 
 async function loadDatabaseConnections() {
   try {
-    const result = await getJson(`${API_BASE_URL}/databases/list`);
+    const result = await getJson(`${API_BASE_URL}/databases/available_list`);
     databaseConnections = Array.isArray(result.connections) ? result.connections : [];
     renderDatabaseOptions();
   } catch (error) {
     databaseConnections = [];
     renderDatabaseOptions();
     showToast(`加载数据库连接失败：${error.message}`);
+  }
+}
+
+async function loadManagedConnections() {
+  try {
+    connectionList.innerHTML = `<div class="connection-empty">正在加载数据库连接...</div>`;
+    const result = await getJson(`${API_BASE_URL}/databases/saved_list`);
+    managedConnections = Array.isArray(result.connections) ? result.connections : [];
+    renderManagedConnections();
+  } catch (error) {
+    managedConnections = [];
+    connectionList.innerHTML = `<div class="connection-empty error">数据库连接列表加载失败：${escapeHtml(error.message)}</div>`;
   }
 }
 
@@ -149,11 +201,27 @@ function renderDatabaseOptions() {
 
 function openModal() {
   dbModal.classList.remove("hidden");
-  dbAlias.focus();
+  showManageConnectionsView();
+  loadManagedConnections();
 }
 
 function closeModal() {
   dbModal.classList.add("hidden");
+}
+
+function showManageConnectionsView() {
+  dbModalTitle.textContent = "数据库连接管理";
+  dbModalSubtitle.textContent = "管理您的数据库连接，选择连接进行数据分析";
+  dbManageView.classList.remove("hidden");
+  dbFormView.classList.add("hidden");
+}
+
+function showAddConnectionView() {
+  dbModalTitle.textContent = "新增数据库连接";
+  dbModalSubtitle.textContent = "填写服务器信息，先查询数据库，再选择一个库保存为分析数据源";
+  dbManageView.classList.add("hidden");
+  dbFormView.classList.remove("hidden");
+  dbAlias.focus();
 }
 
 function setDbStatus(message, type = "normal") {
@@ -169,6 +237,122 @@ function setDbStatus(message, type = "normal") {
   }
 }
 
+function getDatabaseTypeLabel(type) {
+  const map = {
+    mysql: "MySQL",
+    postgresql: "PostgreSQL",
+    neo4j: "Neo4j",
+  };
+  return map[type] || type || "-";
+}
+
+function getDatabaseTypeIcon(type) {
+  const map = {
+    mysql: "◎",
+    postgresql: "♙",
+    neo4j: "⌁",
+  };
+  return map[type] || "◎";
+}
+
+function getConnectionStatusText(status) {
+  if (status === "available") return "已连接";
+  if (status === "unavailable") return "已失效";
+  return "未检测";
+}
+
+function getConnectionStatusClass(status) {
+  if (status === "available") return "available";
+  if (status === "unavailable") return "unavailable";
+  return "unknown";
+}
+
+function renderManagedConnections() {
+  connectionList.innerHTML = "";
+
+  if (!managedConnections.length) {
+    connectionList.innerHTML = `
+      <div class="connection-empty">
+        暂无数据库连接，点击右上角新增连接后，可以在这里管理和刷新状态。
+      </div>
+    `;
+    return;
+  }
+
+  managedConnections.forEach((connection) => {
+    const item = document.createElement("article");
+    item.className = "connection-card";
+    item.dataset.connectionId = connection.id;
+
+    const status = connection.status || "unknown";
+    const lastError = connection.last_error ? ` title="${escapeHtml(connection.last_error)}"` : "";
+
+    item.innerHTML = `
+      <div class="connection-logo" aria-hidden="true">${getDatabaseTypeIcon(connection.db_type)}</div>
+      <div class="connection-info">
+        <strong>${escapeHtml(connection.alias || "未命名连接")}</strong>
+        <span>${escapeHtml(getDatabaseTypeLabel(connection.db_type))}</span>
+        <small>${escapeHtml(connection.database_name || "未选择数据库")}</small>
+      </div>
+      <span class="connection-status ${getConnectionStatusClass(status)}"${lastError}>
+        <i></i>${getConnectionStatusText(status)}
+      </span>
+      <div class="connection-actions">
+        <button type="button" class="connection-icon refresh-connection" aria-label="刷新连接状态" title="刷新连接状态">↻</button>
+        <button type="button" class="connection-icon delete-connection" aria-label="删除连接" title="删除连接">${TRASH_ICON}</button>
+      </div>
+    `;
+
+    item.querySelector(".refresh-connection").addEventListener("click", () => {
+      refreshManagedConnection(connection.id);
+    });
+
+    item.querySelector(".delete-connection").addEventListener("click", () => {
+      deleteManagedConnection(connection.id, connection.alias);
+    });
+
+    connectionList.appendChild(item);
+  });
+}
+
+async function refreshManagedConnection(connectionId) {
+  const card = connectionList.querySelector(`[data-connection-id="${connectionId}"]`);
+  const button = card?.querySelector(".refresh-connection");
+
+  if (button) {
+    button.disabled = true;
+  }
+
+  try {
+    const result = await postJson(`${API_BASE_URL}/databases/${connectionId}/test`, {});
+    showToast(result.success ? "连接可用" : "连接已失效");
+    await loadManagedConnections();
+    await loadDatabaseConnections();
+  } catch (error) {
+    showToast(`刷新连接失败：${error.message}`);
+    await loadManagedConnections();
+    await loadDatabaseConnections();
+  } finally {
+    if (button) {
+      button.disabled = false;
+    }
+  }
+}
+
+async function deleteManagedConnection(connectionId, alias) {
+  const confirmed = window.confirm(`确定删除数据库连接「${alias || connectionId}」吗？`);
+  if (!confirmed) return;
+
+  try {
+    await deleteJson(`${API_BASE_URL}/databases/${connectionId}`);
+    showToast("数据库连接已删除");
+    await loadManagedConnections();
+    await loadDatabaseConnections();
+  } catch (error) {
+    showToast(`删除连接失败：${error.message}`);
+  }
+}
+
 function updatePortByType() {
   const portMap = {
     mysql: "3306",
@@ -176,6 +360,7 @@ function updatePortByType() {
     neo4j: "7687",
   };
   dbPort.value = portMap[dbType.value] || "3306";
+  clearDiscoveredDatabases();
 }
 
 function getFormData() {
@@ -186,23 +371,70 @@ function getFormData() {
     port: Number(dbPort.value),
     user: dbUser.value.trim(),
     password: dbPassword.value,
-    database: dbName.value.trim(),
-    createdAt: new Date().toISOString(),
+    database: dbName.value,
   };
 }
 
-function validateConnectionForm(data) {
-  if (!data.alias) return "请填写连接名称";
+function getServerFormData() {
+  return {
+    type: dbType.value.trim(),
+    host: dbHost.value.trim(),
+    port: Number(dbPort.value),
+    user: dbUser.value.trim(),
+    password: dbPassword.value,
+  };
+}
+
+function validateServerForm(data) {
   if (!data.host) return "请填写主机地址";
   if (!data.port || Number.isNaN(data.port)) return "请填写正确的端口";
   if (!data.user) return "请填写用户名";
-  if (!data.database && data.type !== "neo4j") return "请填写数据库名";
+  if (!data.password) return "请填写密码";
   return "";
 }
 
-async function testConnection() {
-  const data = getFormData();
-  const errorMessage = validateConnectionForm(data);
+function validateConnectionForm(data) {
+  const serverError = validateServerForm(data);
+  if (!data.alias) return "请填写连接名称";
+  if (serverError) return serverError;
+  if (!data.database) return "请先查询并选择数据库";
+  return "";
+}
+
+function clearDiscoveredDatabases() {
+  dbName.innerHTML = `<option value="">请先查询数据库</option>`;
+  dbNameGroup.classList.add("hidden");
+}
+
+function renderDiscoveredDatabases(databases) {
+  dbName.innerHTML = "";
+
+  if (!databases.length) {
+    dbName.innerHTML = `<option value="">当前账号没有可用数据库</option>`;
+    dbNameGroup.classList.remove("hidden");
+    return;
+  }
+
+  databases.forEach((name) => {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    dbName.appendChild(option);
+  });
+
+  dbNameGroup.classList.remove("hidden");
+}
+
+function clearConnectionForm() {
+  dbForm.reset();
+  dbPort.value = "3306";
+  clearDiscoveredDatabases();
+  setDbStatus("请先填写连接信息并查询数据库。");
+}
+
+async function discoverDatabases() {
+  const data = getServerFormData();
+  const errorMessage = validateServerForm(data);
 
   if (errorMessage) {
     setDbStatus(errorMessage, "error");
@@ -210,22 +442,26 @@ async function testConnection() {
   }
 
   testDbBtn.disabled = true;
-  setDbStatus("正在请求后端测试连接...", "normal");
+  setDbStatus("正在查询可用数据库...", "normal");
+  clearDiscoveredDatabases();
 
   try {
-    const result = await postJson(`${API_BASE_URL}/databases/test`, data);
+    const result = await postJson(`${API_BASE_URL}/databases/discover_databases`, data);
+    const databases = Array.isArray(result.databases) ? result.databases : [];
 
-    if (result.success) {
+    renderDiscoveredDatabases(databases);
+
+    if (databases.length) {
       const versionText = result.server_info ? `，版本：${result.server_info}` : "";
-      setDbStatus(`${result.message}${versionText}`, "success");
-      showToast("数据库连接测试成功");
+      setDbStatus(`查询成功，发现 ${databases.length} 个可用数据库${versionText}`, "success");
+      showToast("数据库列表获取成功");
     } else {
-      setDbStatus(result.message || "连接失败", "error");
-      showToast("数据库连接测试失败");
+      setDbStatus("连接成功，但当前账号没有可用业务数据库。", "error");
+      showToast("没有可用数据库");
     }
   } catch (error) {
-    setDbStatus(`连接测试请求失败：${error.message}`, "error");
-    showToast("请确认 FastAPI 后端已经启动");
+    setDbStatus(`查询数据库失败：${error.message}`, "error");
+    showToast("数据库列表获取失败");
   } finally {
     testDbBtn.disabled = false;
   }
@@ -269,10 +505,10 @@ async function saveConnection(event) {
     renderDatabaseOptions();
     databaseSelect.value = savedConnection.id;
 
-    setDbStatus("连接配置已保存到系统数据库。", "success");
     showToast("数据库连接配置已保存");
-
-    setTimeout(closeModal, 620);
+    clearConnectionForm();
+    showManageConnectionsView();
+    await loadManagedConnections();
   } catch (error) {
     setDbStatus(`保存失败：${error.message}`, "error");
     showToast("数据库连接配置保存失败");
@@ -302,6 +538,9 @@ function showToast(message) {
 function showHomeView() {
   currentTaskId = null;
   stopTaskPolling();
+
+  queryInput.value = "";
+  charCounter.textContent = "0 / 2000";
 
   heroSection.classList.remove("hidden");
   featureStrip.classList.remove("hidden");
@@ -414,13 +653,14 @@ function renderTaskList(tasks) {
         <span>${formatTime(task.created_at)}</span>
         <em class="history-status ${getStatusClass(task.status)}">${getStatusText(task.status)}</em>
       </div>
-      <button class="history-delete" aria-label="删除历史报告" title="暂未实现删除">⌫</button>
+      <button type="button" class="history-delete" aria-label="删除历史报告" title="删除历史报告">${TRASH_ICON}</button>
     `;
 
     card.addEventListener("click", (event) => {
-      if (event.target.classList.contains("history-delete")) {
+      const deleteButton = event.target.closest(".history-delete");
+      if (deleteButton) {
         event.stopPropagation();
-        showToast("删除任务功能后面再接");
+        deleteAnalysisTask(task.id, task.title);
         return;
       }
 
@@ -443,6 +683,24 @@ async function loadTaskList() {
   } catch (error) {
     historyList.innerHTML = `<div class="history-empty error">任务列表加载失败</div>`;
     console.error("任务列表加载失败：", error);
+  }
+}
+
+async function deleteAnalysisTask(taskId, title) {
+  const confirmed = window.confirm(`确定删除历史报告「${title || taskId}」吗？`);
+  if (!confirmed) return;
+
+  try {
+    await deleteJson(`${API_BASE_URL}/analyst_task/tasks_info/${taskId}`);
+    showToast("历史报告已删除");
+
+    if (currentTaskId === taskId) {
+      showHomeView();
+    }
+
+    await loadTaskList();
+  } catch (error) {
+    showToast(`删除历史报告失败：${error.message}`);
   }
 }
 
@@ -924,10 +1182,17 @@ queryInput.addEventListener("input", () => {
 startAnalyzeBtn.addEventListener("click", createAnalyzeTask);
 
 openDbModalBtn.addEventListener("click", openModal);
+brandHomeBtn.addEventListener("click", showHomeView);
 closeDbModalBtn.addEventListener("click", closeModal);
-testDbBtn.addEventListener("click", testConnection);
+addConnectionBtn.addEventListener("click", showAddConnectionView);
+backToDbListBtn.addEventListener("click", showManageConnectionsView);
+clearDbFormBtn.addEventListener("click", clearConnectionForm);
+testDbBtn.addEventListener("click", discoverDatabases);
 dbForm.addEventListener("submit", saveConnection);
 dbType.addEventListener("change", updatePortByType);
+[dbHost, dbPort, dbUser, dbPassword].forEach((input) => {
+  input.addEventListener("input", clearDiscoveredDatabases);
+});
 
 backHomeBtn.addEventListener("click", showHomeView);
 

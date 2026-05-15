@@ -9,14 +9,9 @@
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-icon">
-          <span class="db-cylinder"></span>
-          <span class="search-circle"></span>
-          <span class="search-line"></span>
-        </div>
-        <div class="brand-name">Deep-<br />Insight-SQL</div>
-      </div>
+      <button class="brand" id="brandHomeBtn" type="button" aria-label="返回首页">
+        <img class="brand-logo" src="./assets/Logo2.png" alt="DeepInsight-SQL" />
+      </button>
 
       <div class="sidebar-divider"></div>
 
@@ -36,7 +31,7 @@
 
       <button class="connect-entry" id="openDbModalBtn">
         <span class="database-icon">◎</span>
-        <span>连接数据库</span>
+        <span>数据库管理</span>
         <span class="entry-arrow">›</span>
       </button>
     </aside>
@@ -185,64 +180,83 @@
   </div>
 
   <div class="modal-mask hidden" id="dbModal" role="dialog" aria-modal="true" aria-labelledby="dbModalTitle">
-    <div class="modal-panel">
+    <div class="modal-panel db-manager-panel">
       <div class="modal-header">
         <div>
-          <h2 id="dbModalTitle">连接数据库</h2>
-          <p>当前通过 FastAPI 后端测试数据库连接。MVP 阶段暂时只真实支持 MySQL。</p>
+          <h2 id="dbModalTitle">数据库管理</h2>
+          <p id="dbModalSubtitle">管理您的数据库连接，选择连接进行数据分析</p>
         </div>
-        <button class="modal-close" id="closeDbModalBtn" aria-label="关闭弹窗">×</button>
+        <div class="modal-header-actions">
+          <button type="button" class="primary-button small" id="addConnectionBtn">
+            <span>＋</span>
+            <span>新增连接</span>
+          </button>
+          <button class="modal-close" id="closeDbModalBtn" aria-label="关闭弹窗">×</button>
+        </div>
       </div>
 
-      <form class="db-form" id="dbForm">
-        <div class="form-grid">
-          <label>
-            <span>数据库类型</span>
-            <select id="dbType">
-              <option value="mysql" selected>MySQL</option>
-              <option value="postgresql">PostgreSQL</option>
-              <option value="neo4j">Neo4j</option>
-            </select>
-          </label>
-
-          <label>
-            <span>连接名称</span>
-            <input id="dbAlias" type="text" placeholder="例如 analytics_db" value="analytics_db" />
-          </label>
-
-          <label>
-            <span>主机地址</span>
-            <input id="dbHost" type="text" placeholder="127.0.0.1" value="127.0.0.1" />
-          </label>
-
-          <label>
-            <span>端口</span>
-            <input id="dbPort" type="number" placeholder="3306" value="3306" />
-          </label>
-
-          <label>
-            <span>用户名</span>
-            <input id="dbUser" type="text" placeholder="root" value="root" />
-          </label>
-
-          <label>
-            <span>密码</span>
-            <input id="dbPassword" type="password" placeholder="请输入数据库密码" />
-          </label>
-
-          <label class="full-field">
-            <span>数据库名</span>
-            <input id="dbName" type="text" placeholder="例如 demo_data" value="demo_data" />
-          </label>
+      <section class="db-manage-view" id="dbManageView">
+        <div class="connection-list" id="connectionList">
+          <div class="connection-empty">暂无数据库连接，点击右上角新增连接。</div>
         </div>
+      </section>
 
-        <div class="modal-status" id="dbStatus">未连接</div>
+      <section class="db-form-view hidden" id="dbFormView">
+        <button type="button" class="back-list-button" id="backToDbListBtn">← 返回连接列表</button>
 
-        <div class="modal-actions">
-          <button type="button" class="ghost-button" id="testDbBtn">测试连接</button>
-          <button type="submit" class="primary-button small">保存连接</button>
-        </div>
-      </form>
+        <form class="db-form" id="dbForm">
+          <div class="form-grid">
+            <label>
+              <span>连接名称 <em>*</em></span>
+              <input id="dbAlias" type="text" placeholder="请输入连接名称" />
+            </label>
+
+            <label>
+              <span>数据库类型 <em>*</em></span>
+              <select id="dbType">
+                <option value="mysql" selected>MySQL</option>
+                <option value="postgresql">PostgreSQL</option>
+                <option value="neo4j">Neo4j</option>
+              </select>
+            </label>
+
+            <label>
+              <span>主机地址 <em>*</em></span>
+              <input id="dbHost" type="text" placeholder="例如：localhost 或 192.168.1.1" />
+            </label>
+
+            <label>
+              <span>端口 <em>*</em></span>
+              <input id="dbPort" type="number" placeholder="例如：3306" value="3306" />
+            </label>
+
+            <label>
+              <span>用户名 <em>*</em></span>
+              <input id="dbUser" type="text" placeholder="请输入用户名" />
+            </label>
+
+            <label>
+              <span>密码 <em>*</em></span>
+              <input id="dbPassword" type="password" placeholder="请输入密码" />
+            </label>
+
+            <label class="full-field hidden" id="dbNameGroup">
+              <span>数据库名称 <em>*</em></span>
+              <select id="dbName">
+                <option value="">请先查询数据库</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="modal-status" id="dbStatus">请先填写连接信息并查询数据库。</div>
+
+          <div class="modal-actions">
+            <button type="button" class="ghost-button" id="clearDbFormBtn">清空信息</button>
+            <button type="button" class="ghost-button" id="testDbBtn">查询数据库</button>
+            <button type="submit" class="primary-button small">保存连接</button>
+          </div>
+        </form>
+      </section>
     </div>
   </div>
 

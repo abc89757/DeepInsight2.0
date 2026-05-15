@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import traceback
+from pathlib import Path
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
@@ -19,27 +20,22 @@ from system_db import (
 from task_store import TASK_STORE
 
 
-# Deprecated compatibility only. Steps are now inserted by BaseNode at runtime.
-STEP_DEFS: list[tuple[str, str]] = []
-STEP_ORDER_MAP: dict[str, int] = {}
-
-
 def model_to_dict(obj: BaseModel) -> Dict[str, Any]:
-    """兼容 Pydantic v1 / v2 的模型转字典方法。"""
+    """Convert a Pydantic model to a dict in both Pydantic v1 and v2."""
     if hasattr(obj, "model_dump"):
         return obj.model_dump()
     return obj.dict()
 
 
 def mask_connection(conn: DatabaseConnection) -> Dict[str, Any]:
-    """返回给前端或保存展示时，避免把明文密码暴露出去。"""
+    """Return connection data without exposing the plaintext password."""
     data = model_to_dict(conn)
     data["password"] = "******" if conn.password else ""
     return data
 
 
 def normalize_task_status(status: Optional[str], error: Optional[str] = None) -> str:
-    """把旧的内存状态映射到数据库状态。"""
+    """Normalize runtime status values into database status values."""
     if error:
         return "failed"
 
@@ -64,10 +60,7 @@ def normalize_task_status(status: Optional[str], error: Optional[str] = None) ->
 
 
 def upsert_database_connection(conn: DatabaseConnection) -> str:
-    """
-    保存或更新数据库连接配置。
-    当前前端仍然传完整连接配置，所以这里按 alias 做 upsert。
-    """
+    """Save or update a database connection by alias."""
     conn_id = uuid4().hex
     password_encrypted = encrypt_password(conn.password or "")
 
@@ -137,7 +130,7 @@ def insert_analysis_task(
     connection_id: str,
     precheck_result: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """向 analysis_tasks 插入任务主记录。"""
+    """Insert the task master record into analysis_tasks."""
     question = request.question.strip()
     title = question[:40] if len(question) <= 40 else question[:40] + "..."
     now = now_str()
@@ -208,53 +201,6 @@ def insert_analysis_task(
     return task
 
 
-def insert_initial_steps(task_id: str, precheck_result: Dict[str, Any]) -> None:
-    """创建任务时初始化所有步骤。"""
-    with get_system_db() as db:
-        with db.cursor() as cursor:
-            for index, (step_name, step_title) in enumerate(STEP_DEFS, start=1):
-                step_id = uuid4().hex
-
-                if step_name == "database_precheck":
-                    status = "succeeded"
-                    output_summary = (
-                        f"数据库连接成功，检测到 {precheck_result.get('table_count', 0)} 张表。"
-                    )
-                    output_json = precheck_result
-                else:
-                    status = "pending"
-                    output_summary = None
-                    output_json = None
-
-                cursor.execute(
-                    """
-                    INSERT INTO task_steps (
-                        id, task_id, step_order, step_name, step_title,
-                        status, output_summary, output_json,
-                        started_at, finished_at
-                    )
-                    VALUES (
-                        %s, %s, %s, %s, %s,
-                        %s, %s, CAST(%s AS JSON),
-                        CASE WHEN %s = 'succeeded' THEN NOW() ELSE NULL END,
-                        CASE WHEN %s = 'succeeded' THEN NOW() ELSE NULL END
-                    )
-                    """,
-                    (
-                        step_id,
-                        task_id,
-                        index,
-                        step_name,
-                        step_title,
-                        status,
-                        output_summary,
-                        json_dumps(output_json) if output_json is not None else None,
-                        status,
-                        status,
-                    ),
-                )
-
-
 def _next_step_order(cursor: Any, task_id: str) -> int:
     cursor.execute(
         "SELECT COALESCE(MAX(step_order), 0) + 1 AS next_order FROM task_steps WHERE task_id = %s",
@@ -274,7 +220,7 @@ def insert_task_step(
     output_json: Any = None,
     error_message: Optional[str] = None,
 ) -> str:
-    """Insert one real task step at runtime and return its row id."""
+    """Insert one real runtime step and return its id."""
     step_id = uuid4().hex
 
     with get_system_db() as db:
@@ -320,7 +266,7 @@ def update_task_stage(
     message: Optional[str],
     status: str = "running",
 ) -> None:
-    """Update the task headline state without touching step rows."""
+    """Update the task headline state when a node starts or the task ends."""
     with get_system_db() as db:
         with db.cursor() as cursor:
             cursor.execute(
@@ -361,7 +307,7 @@ def start_task_step(
     input_summary: Optional[str] = None,
     message: Optional[str] = None,
 ) -> str:
-    """Record that a graph node has started."""
+    """Record that a LangGraph node has started."""
     step_id = insert_task_step(
         task_id=task_id,
         step_name=step_name,
@@ -420,7 +366,7 @@ def fail_task_step(step_id: str, error_message: str) -> None:
 
 
 def insert_database_precheck_step(task_id: str, precheck_result: Dict[str, Any]) -> None:
-    """Record the pre-task database check as a completed real step."""
+    """Record the completed database precheck as a real task step."""
     table_count = precheck_result.get("table_count", 0)
     insert_task_step(
         task_id=task_id,
@@ -433,7 +379,7 @@ def insert_database_precheck_step(task_id: str, precheck_result: Dict[str, Any])
 
 
 def infer_columns_from_preview(rows: Any) -> list:
-    """从 result_preview 里推断列名。"""
+    """Infer column names from preview rows."""
     if not rows:
         return []
 
@@ -448,11 +394,103 @@ def infer_columns_from_preview(rows: Any) -> list:
     return ["value"]
 
 
+def _local_file_info(uri: Optional[str]) -> Dict[str, Any]:
+    if not uri:
+        return {"file_name": None, "size_bytes": None}
+
+    path = Path(uri)
+    return {
+        "file_name": path.name,
+        "size_bytes": path.stat().st_size if path.exists() else None,
+    }
+
+
+def upsert_task_artifact(
+    task_id: str,
+    artifact_type: str,
+    uri: Optional[str],
+    mime_type: Optional[str],
+    description: Optional[str],
+    storage_type: str = "local",
+) -> Optional[str]:
+    """Register a generated file in task_artifacts and return the artifact id."""
+    if not uri:
+        return None
+
+    file_info = _local_file_info(uri)
+
+    with get_system_db() as db:
+        with db.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id FROM task_artifacts
+                WHERE task_id = %s AND artifact_type = %s AND uri = %s
+                LIMIT 1
+                """,
+                (task_id, artifact_type, uri),
+            )
+            existing = cursor.fetchone()
+
+            if existing:
+                artifact_id = existing["id"]
+                cursor.execute(
+                    """
+                    UPDATE task_artifacts
+                    SET
+                        storage_type = %s,
+                        file_name = %s,
+                        mime_type = %s,
+                        size_bytes = %s,
+                        description = %s
+                    WHERE id = %s
+                    """,
+                    (
+                        storage_type,
+                        file_info["file_name"],
+                        mime_type,
+                        file_info["size_bytes"],
+                        description,
+                        artifact_id,
+                    ),
+                )
+                return artifact_id
+
+            artifact_id = uuid4().hex
+            cursor.execute(
+                """
+                INSERT INTO task_artifacts (
+                    id, task_id, artifact_type, storage_type, uri,
+                    file_name, mime_type, size_bytes, description
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    artifact_id,
+                    task_id,
+                    artifact_type,
+                    storage_type,
+                    uri,
+                    file_info["file_name"],
+                    mime_type,
+                    file_info["size_bytes"],
+                    description,
+                ),
+            )
+            return artifact_id
+
+
 def upsert_query_result_from_state(task_id: str, state: Dict[str, Any]) -> None:
-    """把内存 state 里的 SQL 和查询结果预览同步到 query_results。"""
+    """Sync SQL and query preview data into query_results."""
     sql = state.get("sql")
     rows = state.get("result_preview") or []
     row_count = state.get("result_row_count") or len(rows)
+    result_artifact_id = upsert_task_artifact(
+        task_id=task_id,
+        artifact_type="result_csv",
+        uri=state.get("result_path"),
+        mime_type="text/csv",
+        description="SQL 查询完整结果 CSV",
+    )
 
     if not sql and not rows:
         return
@@ -478,7 +516,8 @@ def upsert_query_result_from_state(task_id: str, state: Dict[str, Any]) -> None:
                         preview_rows_json = CAST(%s AS JSON),
                         row_count = %s,
                         preview_row_count = %s,
-                        result_format = 'csv'
+                        result_format = 'csv',
+                        artifact_id = COALESCE(%s, artifact_id)
                     WHERE id = %s
                     """,
                     (
@@ -487,6 +526,7 @@ def upsert_query_result_from_state(task_id: str, state: Dict[str, Any]) -> None:
                         json_dumps(rows),
                         row_count,
                         preview_row_count,
+                        result_artifact_id,
                         existing["id"],
                     ),
                 )
@@ -495,11 +535,11 @@ def upsert_query_result_from_state(task_id: str, state: Dict[str, Any]) -> None:
                     """
                     INSERT INTO query_results (
                         id, task_id, sql_text, columns_json, preview_rows_json,
-                        row_count, preview_row_count, result_format
+                        row_count, preview_row_count, result_format, artifact_id
                     )
                     VALUES (
                         %s, %s, %s, CAST(%s AS JSON), CAST(%s AS JSON),
-                        %s, %s, 'csv'
+                        %s, %s, 'csv', %s
                     )
                     """,
                     (
@@ -510,12 +550,13 @@ def upsert_query_result_from_state(task_id: str, state: Dict[str, Any]) -> None:
                         json_dumps(rows),
                         row_count,
                         preview_row_count,
+                        result_artifact_id,
                     ),
                 )
 
 
 def upsert_report_from_state(task_id: str, state: Dict[str, Any]) -> None:
-    """把内存 state 里的报告同步到 reports。"""
+    """Sync the generated Markdown report into reports."""
     report = state.get("report")
 
     if not report:
@@ -560,99 +601,33 @@ def upsert_report_from_state(task_id: str, state: Dict[str, Any]) -> None:
             )
 
 
-def update_steps_from_state(task_id: str, state: Dict[str, Any]) -> None:
-    """根据当前 stage 更新 task_steps。"""
-    current_stage = state.get("stage") or state.get("current_stage") or "waiting"
-    task_status = normalize_task_status(state.get("status"), state.get("error"))
-    message = state.get("message") or ""
-
-    current_order = STEP_ORDER_MAP.get(current_stage)
-
-    with get_system_db() as db:
-        with db.cursor() as cursor:
-            cursor.execute(
-                "SELECT step_order, step_name FROM task_steps WHERE task_id = %s",
-                (task_id,),
-            )
-            steps = cursor.fetchall()
-
-            for step in steps:
-                step_order = step["step_order"]
-                step_name = step["step_name"]
-
-                if task_status == "succeeded":
-                    new_status = "succeeded"
-                elif task_status == "failed":
-                    if current_order and step_order == current_order:
-                        new_status = "failed"
-                    elif current_order and step_order < current_order:
-                        new_status = "succeeded"
-                    else:
-                        new_status = "pending"
-                elif current_order:
-                    if step_order < current_order:
-                        new_status = "succeeded"
-                    elif step_order == current_order:
-                        new_status = "running"
-                    else:
-                        new_status = "pending"
-                else:
-                    new_status = "pending"
-
-                output_summary = None
-                output_json = None
-
-                if step_order == current_order:
-                    output_summary = message
-
-                if step_name == "plan_query" and state.get("analysis_result"):
-                    output_json = state.get("analysis_result")
-
-                if "sql" in step_name and state.get("sql"):
-                    output_json = {
-                        "sql": state.get("sql"),
-                    }
-
-                cursor.execute(
-                    """
-                    UPDATE task_steps
-                    SET
-                        status = %s,
-                        output_summary = COALESCE(%s, output_summary),
-                        output_json = COALESCE(CAST(%s AS JSON), output_json),
-                        error_message = CASE WHEN %s = 'failed' THEN %s ELSE error_message END,
-                        started_at = CASE
-                            WHEN started_at IS NULL AND %s IN ('running', 'succeeded', 'failed')
-                            THEN NOW()
-                            ELSE started_at
-                        END,
-                        finished_at = CASE
-                            WHEN finished_at IS NULL AND %s IN ('succeeded', 'failed')
-                            THEN NOW()
-                            ELSE finished_at
-                        END
-                    WHERE task_id = %s AND step_order = %s
-                    """,
-                    (
-                        new_status,
-                        output_summary,
-                        json_dumps(output_json) if output_json is not None else None,
-                        new_status,
-                        state.get("error"),
-                        new_status,
-                        new_status,
-                        task_id,
-                        step_order,
-                    ),
-                )
+def upsert_artifacts_from_state(task_id: str, state: Dict[str, Any]) -> None:
+    """Register generated local files in task_artifacts."""
+    upsert_task_artifact(
+        task_id=task_id,
+        artifact_type="result_csv",
+        uri=state.get("result_path"),
+        mime_type="text/csv",
+        description="SQL 查询完整结果 CSV",
+    )
+    upsert_task_artifact(
+        task_id=task_id,
+        artifact_type="report_md",
+        uri=state.get("report_path"),
+        mime_type="text/markdown",
+        description="Markdown 分析报告",
+    )
+    upsert_task_artifact(
+        task_id=task_id,
+        artifact_type="metadata_json",
+        uri=state.get("metadata_path"),
+        mime_type="application/json",
+        description="任务执行元数据",
+    )
 
 
 def sync_task_state_to_db(task_id: str, state: Dict[str, Any]) -> None:
-    """
-    把 TASK_STORE 中的任务状态同步到 MySQL。
-
-    这是过渡方案：task_runner 继续更新 TASK_STORE，系统库负责持久化展示状态。
-    """
+    """Sync the in-memory runtime state into durable task tables."""
     if not state:
         return
 
@@ -699,10 +674,11 @@ def sync_task_state_to_db(task_id: str, state: Dict[str, Any]) -> None:
 
     upsert_query_result_from_state(task_id, state)
     upsert_report_from_state(task_id, state)
+    upsert_artifacts_from_state(task_id, state)
 
 
 def list_tasks_from_db(limit: int = 100) -> list:
-    """读取左侧任务列表。"""
+    """Read the task list for the sidebar."""
     for task_id, state in list(TASK_STORE.items()):
         try:
             sync_task_state_to_db(task_id, state)
@@ -741,8 +717,19 @@ def list_tasks_from_db(limit: int = 100) -> list:
     return result
 
 
+def delete_task_from_db(task_id: str) -> None:
+    """Delete one analysis task and its cascading database records."""
+    TASK_STORE.pop(task_id, None)
+
+    with get_system_db() as db:
+        with db.cursor() as cursor:
+            cursor.execute("DELETE FROM analysis_tasks WHERE id = %s", (task_id,))
+            if cursor.rowcount == 0:
+                raise HTTPException(status_code=404, detail="任务不存在")
+
+
 def get_task_detail_from_db(task_id: str) -> Dict[str, Any]:
-    """读取任务详情，聚合 task / steps / query_result / report / artifacts。"""
+    """Read task detail and join task / steps / query_result / report / artifacts."""
     state = TASK_STORE.get(task_id)
     if state:
         sync_task_state_to_db(task_id, state)

@@ -64,71 +64,24 @@ button {
 .brand {
   display: flex;
   align-items: center;
-  gap: 16px;
   min-height: 70px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
 }
 
-.brand-icon {
-  position: relative;
-  width: 68px;
-  height: 68px;
-  flex: 0 0 68px;
-  border-radius: 10px;
-  background: linear-gradient(145deg, #063078, #0d55b8);
-  box-shadow: 0 12px 24px rgba(11, 68, 152, 0.22);
-  overflow: hidden;
+.brand:focus-visible {
+  outline: 3px solid rgba(13, 110, 253, 0.28);
+  outline-offset: 6px;
 }
 
-.db-cylinder::before,
-.db-cylinder::after {
-  content: "";
-  position: absolute;
-  left: 13px;
-  width: 36px;
-  height: 11px;
-  border: 4px solid #ffffff;
-  border-radius: 50%;
-}
-
-.db-cylinder::before {
-  top: 12px;
-  background: rgba(255, 255, 255, 0.18);
-}
-
-.db-cylinder::after {
-  top: 28px;
-  border-top: 0;
-  height: 16px;
-  border-radius: 0 0 18px 18px;
-}
-
-.search-circle {
-  position: absolute;
-  right: 9px;
-  bottom: 14px;
-  width: 25px;
-  height: 25px;
-  border: 4px solid #ffffff;
-  border-radius: 50%;
-}
-
-.search-line {
-  position: absolute;
-  right: 5px;
-  bottom: 8px;
-  width: 18px;
-  height: 4px;
-  border-radius: 999px;
-  background: #ffffff;
-  transform: rotate(45deg);
-}
-
-.brand-name {
-  font-size: 30px;
-  line-height: 1.12;
-  font-weight: 800;
-  color: var(--blue-900);
-  letter-spacing: -0.8px;
+.brand-logo {
+  width: min(230px, 100%);
+  height: auto;
+  flex: 0 1 230px;
+  object-fit: contain;
 }
 
 .sidebar-divider {
@@ -231,15 +184,31 @@ button {
 }
 
 .history-delete {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
+  border-radius: 8px;
   background: transparent;
   color: #71809a;
-  font-size: 19px;
   transition: 0.18s ease;
 }
 
 .history-delete:hover {
   color: #e35353;
+  background: #fff0f0;
+}
+
+.history-delete svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .connect-entry {
@@ -609,9 +578,14 @@ textarea:focus {
   overflow: hidden;
 }
 
+.db-manager-panel {
+  width: min(860px, 96vw);
+}
+
 .modal-header {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 20px;
   padding: 26px 30px 20px;
   border-bottom: 1px solid #e7edf7;
@@ -629,6 +603,12 @@ textarea:focus {
   font-size: 14px;
 }
 
+.modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
 .modal-close {
   width: 34px;
   height: 34px;
@@ -638,6 +618,173 @@ textarea:focus {
   background: #f0f4fb;
   font-size: 24px;
   line-height: 1;
+}
+
+.db-manage-view {
+  padding: 22px 30px 30px;
+}
+
+.connection-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: min(56vh, 520px);
+  overflow: auto;
+}
+
+.connection-empty {
+  padding: 34px 18px;
+  border: 1px dashed #d8e1f0;
+  border-radius: 12px;
+  color: #65738c;
+  background: #f8fbff;
+  text-align: center;
+  font-size: 14px;
+}
+
+.connection-empty.error {
+  color: #a02f2f;
+  background: #fff0f0;
+}
+
+.connection-card {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid #dfe7f4;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.connection-logo {
+  width: 54px;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  color: #0d6efd;
+  background: #edf4ff;
+  font-size: 28px;
+  font-weight: 900;
+}
+
+.connection-info {
+  min-width: 0;
+}
+
+.connection-info strong,
+.connection-info span,
+.connection-info small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-info strong {
+  color: #14294f;
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+.connection-info span {
+  margin-top: 5px;
+  color: #65738c;
+  font-size: 14px;
+}
+
+.connection-info small {
+  margin-top: 4px;
+  color: #7a879c;
+  font-size: 13px;
+}
+
+.connection-status {
+  min-width: 82px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.connection-status i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.connection-status.available {
+  color: #116735;
+  background: #e7f7ef;
+}
+
+.connection-status.unavailable {
+  color: #a02f2f;
+  background: #fff0f0;
+}
+
+.connection-status.unknown {
+  color: #86650d;
+  background: #fff8df;
+}
+
+.connection-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.connection-icon {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d7e0ee;
+  border-radius: 9px;
+  color: #49617f;
+  background: #ffffff;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.connection-icon svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.connection-icon:hover {
+  color: #0d6efd;
+  border-color: #9fc4ff;
+  background: #f6f9ff;
+}
+
+.delete-connection:hover {
+  color: #a02f2f;
+  border-color: #f2bcbc;
+  background: #fff7f7;
+}
+
+.back-list-button {
+  margin: 22px 30px 0;
+  padding: 0;
+  border: 0;
+  color: #0d6efd;
+  background: transparent;
+  font-size: 15px;
+  font-weight: 800;
 }
 
 .db-form {
@@ -660,6 +807,11 @@ textarea:focus {
   color: #253653;
   font-size: 14px;
   font-weight: 800;
+}
+
+.form-grid label em {
+  color: #d13d3d;
+  font-style: normal;
 }
 
 .form-grid input,
@@ -747,10 +899,6 @@ textarea:focus {
     --sidebar-width: 290px;
   }
 
-  .brand-name {
-    font-size: 25px;
-  }
-
   .feature-strip {
     padding: 0 36px;
     gap: 20px;
@@ -809,6 +957,33 @@ textarea:focus {
 
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .connection-card {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+
+  .connection-status,
+  .connection-actions {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .modal-actions {
+    flex-direction: column;
+  }
+
+  .modal-header {
+    flex-direction: column;
+  }
+
+  .modal-header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .ghost-button {
+    width: 100%;
   }
 }
 
