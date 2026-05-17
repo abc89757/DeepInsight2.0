@@ -15,6 +15,7 @@ from services.task_persistence import (
     insert_analysis_task,
     list_tasks_from_db,
 )
+from services.task_title import generate_task_title
 from task_store import TASK_STORE
 
 
@@ -54,12 +55,14 @@ def create_analysis_task(
     )
 
     task_id = uuid4().hex
+    task_title = generate_task_title(question)
 
     task = insert_analysis_task(
         task_id=task_id,
         request=task_request,
         connection_id=request.connection_id,
         precheck_result=precheck_result,
+        title=task_title,
     )
 
     insert_database_precheck_step(task_id, precheck_result)

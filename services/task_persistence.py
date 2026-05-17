@@ -129,10 +129,11 @@ def insert_analysis_task(
     request: AnalysisTaskContext,
     connection_id: str,
     precheck_result: Dict[str, Any],
+    title: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Insert the task master record into analysis_tasks."""
     question = request.question.strip()
-    title = question[:40] if len(question) <= 40 else question[:40] + "..."
+    title = (title or "").strip() or (question[:40] if len(question) <= 40 else question[:40] + "...")
     now = now_str()
 
     task = {

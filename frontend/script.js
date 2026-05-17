@@ -1,12 +1,17 @@
 const API_BASE_URL = "http://127.0.0.1:8000/api";
 const TASK_POLL_INTERVAL = 1800;
+const LOGO_FULL_SRC = "./assets/Logo2.png";
+const LOGO_MARK_SRC = "./assets/Logo3.png";
 
+const appShell = document.querySelector(".app-shell");
 const queryInput = document.getElementById("queryInput");
 const charCounter = document.getElementById("charCounter");
 const startAnalyzeBtn = document.getElementById("startAnalyzeBtn");
 const databaseSelect = document.getElementById("databaseSelect");
 const openDbModalBtn = document.getElementById("openDbModalBtn");
 const brandHomeBtn = document.getElementById("brandHomeBtn");
+const brandLogo = document.querySelector(".brand-logo");
+const sidebarCollapseBtn = document.getElementById("sidebarCollapseBtn");
 const closeDbModalBtn = document.getElementById("closeDbModalBtn");
 const dbModal = document.getElementById("dbModal");
 const dbModalTitle = document.getElementById("dbModalTitle");
@@ -55,6 +60,7 @@ let currentTaskId = null;
 let taskPollTimer = null;
 let databaseConnections = [];
 let managedConnections = [];
+let isSidebarCollapsed = false;
 const connectionDetailCache = new Map();
 const TRASH_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -534,6 +540,24 @@ function showToast(message) {
 /* =========================
    页面切换
 ========================= */
+
+function setSidebarCollapsed(collapsed) {
+  isSidebarCollapsed = collapsed;
+  appShell.classList.toggle("sidebar-collapsed", collapsed);
+  brandLogo.src = collapsed ? LOGO_MARK_SRC : LOGO_FULL_SRC;
+  brandHomeBtn.setAttribute("aria-label", collapsed ? "展开边栏" : "返回首页");
+  brandHomeBtn.title = collapsed ? "展开边栏" : "返回首页";
+  sidebarCollapseBtn.setAttribute("aria-expanded", String(!collapsed));
+}
+
+function handleBrandClick() {
+  if (isSidebarCollapsed) {
+    setSidebarCollapsed(false);
+    return;
+  }
+
+  showHomeView();
+}
 
 function showHomeView() {
   currentTaskId = null;
@@ -1182,7 +1206,8 @@ queryInput.addEventListener("input", () => {
 startAnalyzeBtn.addEventListener("click", createAnalyzeTask);
 
 openDbModalBtn.addEventListener("click", openModal);
-brandHomeBtn.addEventListener("click", showHomeView);
+brandHomeBtn.addEventListener("click", handleBrandClick);
+sidebarCollapseBtn.addEventListener("click", () => setSidebarCollapsed(true));
 closeDbModalBtn.addEventListener("click", closeModal);
 addConnectionBtn.addEventListener("click", showAddConnectionView);
 backToDbListBtn.addEventListener("click", showManageConnectionsView);
