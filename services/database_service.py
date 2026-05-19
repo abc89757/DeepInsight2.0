@@ -26,9 +26,9 @@ def test_mysql_connection(conn: DatabaseConnection) -> TestConnectionResponse:
             password=conn.password,
             database=conn.database,
             charset="utf8mb4",
-            connect_timeout=5,
-            read_timeout=5,
-            write_timeout=5,
+            connect_timeout=300,
+            read_timeout=300,
+            write_timeout=300,
             autocommit=True,
         )
         try:
@@ -65,9 +65,9 @@ def discover_mysql_databases(conn: DatabaseServerConnection) -> Dict[str, Any]:
             user=conn.user,
             password=conn.password,
             charset="utf8mb4",
-            connect_timeout=5,
-            read_timeout=5,
-            write_timeout=5,
+            connect_timeout=300,
+            read_timeout=300,
+            write_timeout=300,
             autocommit=True,
         )
         try:
@@ -110,9 +110,9 @@ def precheck_mysql_for_task(conn: DatabaseConnection) -> Dict[str, Any]:
             password=conn.password,
             database=conn.database,
             charset="utf8mb4",
-            connect_timeout=5,
-            read_timeout=5,
-            write_timeout=5,
+            connect_timeout=300,
+            read_timeout=300,
+            write_timeout=300,
             autocommit=True,
         )
 

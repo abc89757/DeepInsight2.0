@@ -1,3 +1,8 @@
+---
+name: 电商数据分析
+description: 适用于电商、订单、销售、商品、品类、地区、用户购买行为等数据分析场景。
+---
+
 # Ecommerce Analysis Skill
 
 ## 适用场景

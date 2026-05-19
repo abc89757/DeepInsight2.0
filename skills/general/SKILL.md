@@ -1,3 +1,8 @@
+---
+name: 通用数据分析
+description: 适用于没有专用场景 Skill 时的通用数据分析任务，可根据用户问题和查询结果生成简洁、可信、可展示的分析结论。
+---
+
 # General Data Analysis Skill
 
 ## 适用场景

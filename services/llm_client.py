@@ -12,6 +12,8 @@ class LLMClient:
         self.api_key = os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
         self.base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
         self.model = os.getenv("LLM_MODEL", "deepseek-chat")
+        self.default_timeout = int(os.getenv("LLM_TIMEOUT_SECONDS", "300"))
+        self.max_retries = int(os.getenv("LLM_MAX_RETRIES", "1"))
 
     def complete(
         self,
@@ -20,7 +22,7 @@ class LLMClient:
         temperature: float = 0.2,
         tools: Optional[list[Any]] = None,
         stream: bool = False,
-        timeout: int = 60,
+        timeout: int = 300,
     ) -> str:
         if stream:
             raise NotImplementedError("Streaming LLM output is not implemented yet")
@@ -34,7 +36,7 @@ class LLMClient:
                 system_prompt=system_prompt,
                 temperature=temperature,
                 tools=tools,
-                timeout=timeout,
+                timeout=int(os.getenv("LLM_TIMEOUT_SECONDS", str(timeout or self.default_timeout))),
             )
 
         if self.mode == "local":
@@ -76,9 +78,24 @@ class LLMClient:
         if tools:
             kwargs["tools"] = tools
 
-        response = client.chat.completions.create(**kwargs)
-        content = response.choices[0].message.content
-        return content.strip() if content else ""
+        last_exc: Optional[Exception] = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = client.chat.completions.create(**kwargs)
+                content = response.choices[0].message.content
+                return content.strip() if content else ""
+            except Exception as exc:
+                last_exc = exc
+                if not self._is_timeout_error(exc) or attempt >= self.max_retries:
+                    raise
+                print(f"LLM request timed out, retrying ({attempt + 1}/{self.max_retries})...")
+
+        raise last_exc or RuntimeError("LLM request failed")
+
+    def _is_timeout_error(self, exc: Exception) -> bool:
+        error_name = exc.__class__.__name__.lower()
+        error_text = str(exc).lower()
+        return "timeout" in error_name or "timed out" in error_text
 
     def _mock_response(self, prompt: str) -> str:
         lower_prompt = prompt.lower()

@@ -12,7 +12,7 @@ def generate_task_title(question: str) -> str:
             prompt=build_task_title_prompt(question),
             system_prompt="你只输出任务标题本身，不输出任何解释。",
             temperature=0.1,
-            timeout=20,
+            timeout=300,
         )
         title = clean_task_title(raw_title)
         if title:
