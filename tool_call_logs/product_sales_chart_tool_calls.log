@@ -1,0 +1,6 @@
+2026-05-23T21:10:52 [draw_bar_chart] file_path=C:\Users\NihaoA\AppData\Local\Temp\chart_tool_test.csv, x=state, y=sales
+2026-05-23T21:10:52 [draw_line_chart] file_path=C:\Users\NihaoA\AppData\Local\Temp\chart_tool_test.csv, x=date, y=sales, series=None
+2026-05-23T21:10:52 [draw_pie_chart] file_path=C:\Users\NihaoA\AppData\Local\Temp\chart_tool_test.csv, label=state, value=sales
+2026-05-23T21:12:43 [draw_bar_chart] file_path=C:\Users\NihaoA\AppData\Local\Temp\chart_font_test.csv, x=state, y=sales
+2026-05-23T21:38:24 [draw_bar_chart] file_path=outputs\1f41223290654ef3b708e69570fcf817\q001_result.csv, x=state, y=median_transaction_price
+2026-05-23T21:38:24 [draw_bar_chart] file_path=outputs\1f41223290654ef3b708e69570fcf817\q001_result.csv, x=state, y=total_sales_amount

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from api import router as api_router
 
@@ -19,6 +20,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(api_router)
+    app.mount("/outputs", StaticFiles(directory="outputs"), name="outputs")
     return app
 
 

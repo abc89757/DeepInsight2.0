@@ -70,8 +70,21 @@ class SkillAdvisorNode(AgentNode):
     name = "skill_advisor"
     title = "场景顾问"
     description = "根据用户问题选择最合适的分析 Skill。"
-    system_prompt = "你是数据分析场景顾问。你只输出 JSON，不输出解释。"
+    system_prompt = """
+你是数据分析场景顾问。你负责根据用户的数据分析需求，从可用 Skill 中选择一个最合适的场景。
+
+要求：
+1. 只输出 JSON，不要输出 Markdown 或解释。
+2. JSON 字符串内部如果需要引用字段值、标签或原文，请使用单引号或中文引号，不要使用英文双引号；如果必须使用英文双引号，必须写成转义形式 `\"`。
+
+只输出 JSON：
+{
+  "skill_name": "skill folder name",
+  "reason": "选择原因"
+}
+""".strip()
     temperature = 0.1
+    use_stream = False
     skills_root = Path("skills")
 
     def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -149,45 +162,13 @@ class SkillAdvisorNode(AgentNode):
         输出:
             要求模型返回 JSON Skill 选择结果的 prompt 字符串。
         """
-        # todo:提示词要改
         return f"""
-            请根据用户的数据分析需求，从可用 Skill 中选择一个最合适的场景。
-            
-            用户问题：
-            {state["question"]}
-            
-            可用 Skill：
-            {json_dumps(state.get("available_skills", []))}
-            
-要求：
-1. 只输出 JSON，不要输出 Markdown 或解释。
-2. JSON 字符串内部如果需要引用字段值、标签或原文，请使用单引号或中文引号，不要使用英文双引号；如果必须使用英文双引号，必须写成转义形式 `\"`。
+用户问题：
+{state["question"]}
 
-只输出 JSON：
-{{
-  "skill_name": "skill folder name",
-  "reason": "选择原因"
-}}
+可用 Skill：
+{json_dumps(state.get("available_skills", []))}
 """.strip()
-
-    def call_llm(self, prompt: str, state: Dict[str, Any]) -> str:
-        """调用配置好的 LLM 完成 Skill 选择。
-
-        输入:
-            prompt: `build_prompt` 生成的 prompt。
-            state: 当前图状态；此处主要用于保持 AgentNode 接口一致。
-
-        输出:
-            模型返回的原始文本。
-        """
-        return self.llm_client.complete(
-            prompt=prompt,
-            system_prompt=self.system_prompt,
-            temperature=self.temperature,
-            tools=self.tools,
-            stream=self.stream,
-            timeout=self.timeout,
-        )
 
     def summarize_output(self, output: Dict[str, Any]) -> Optional[str]:
         """生成用于任务步骤日志的简短摘要。

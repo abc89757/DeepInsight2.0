@@ -872,7 +872,10 @@ def get_task_detail_from_db(task_id: str) -> Dict[str, Any]:
     task["stage"] = real_stage
     task["current_stage"] = real_stage
     task["message"] = latest_state.get("message") or task.get("message")
-    task["status"] = latest_state.get("status") or task.get("status")
+    task["status"] = normalize_task_status(
+        latest_state.get("status") or task.get("status"),
+        latest_state.get("error") or task.get("error"),
+    )
     task["database"] = latest_state.get("database")
     task["database_precheck"] = latest_state.get("database_precheck")
     task["sql"] = latest_state.get("sql")

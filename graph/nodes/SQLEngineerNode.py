@@ -41,8 +41,24 @@ class SQLEngineerNode(AgentNode):
     name = "sql_engineer"
     title = "SQL 工程师"
     description = "根据证据规划生成只读 SQL 查询。"
-    system_prompt = "你是严谨的 MySQL SQL 工程师。你只输出 SQL，不输出解释。"
+    system_prompt = """
+你是严谨的 MySQL SQL 工程师。你只输出 SQL，不输出解释。
+请根据证据规划和数据库 Schema 生成一条可执行的 MySQL SELECT SQL。
+
+要求：
+1. 只能生成 SELECT 或 WITH 查询。
+2. 不允许 INSERT、UPDATE、DELETE、DROP、ALTER、TRUNCATE、CREATE 等写操作。
+3. 尽量使用 Schema 中真实存在的表和字段。
+4. 如果需要聚合，请在 SQL 中完成基础聚合。
+5. 返回结果应服务于证据规划。
+6. 必须严格兼容 MySQL 8 语法，不要使用 PostgreSQL、Oracle、SQL Server、Hive 或 Spark SQL 方言。
+7. 禁止使用 MySQL 不支持的中位数/百分位函数或语法，例如 PERCENTILE_CONT、PERCENTILE_DISC、WITHIN GROUP、APPROX_PERCENTILE、MEDIAN()、QUALIFY。
+8. 如果需要计算中位数，请使用 MySQL 8 窗口函数 ROW_NUMBER() OVER (...) 和 COUNT(*) OVER (...)，选取中间行后 AVG() 得到中位数。
+9. 不要使用 FILTER (WHERE ...)、:: 类型转换、DATE_TRUNC、ILIKE、TOP 等非 MySQL 写法。
+10. 只输出 SQL，不要 Markdown。
+""".strip()
     temperature = 0.1
+    use_stream = False
     timeout = 300
 
     def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -54,7 +70,7 @@ class SQLEngineerNode(AgentNode):
                 `audit_message`。
 
         输出:
-            包含 `sql`、`current_sql` 和递增后 `sql_attempts` 的状态更新。
+            包含 `sql` 和递增后 `sql_attempts` 的状态更新。
         """
         raw_sql = self.call_llm(self.build_prompt(state), state)
         self.save_raw_llm_output(state, raw_sql, label="raw_sql")
@@ -63,7 +79,6 @@ class SQLEngineerNode(AgentNode):
             raise ValueError("SQL 工程师没有生成有效 SQL。")
         return {
             "sql": sql,
-            "current_sql": sql,
             "sql_attempts": int(state.get("sql_attempts") or 0) + 1,
         }
 
@@ -77,24 +92,9 @@ class SQLEngineerNode(AgentNode):
         输出:
             要求模型只输出 MySQL SELECT/WITH SQL 的 prompt 字符串。
         """
-        skill = state.get("skill") or {}
         audit_message = state.get("audit_message")
         retry_hint = f"\n上一次 SQL 审计失败原因：{audit_message}\n请修复后重新生成。" if audit_message else ""
         return f"""
-请根据证据规划和数据库 Schema 生成一条可执行的 MySQL SELECT SQL。
-要求：
-1. 只能生成 SELECT 或 WITH 查询。
-2. 不允许 INSERT、UPDATE、DELETE、DROP、ALTER、TRUNCATE、CREATE 等写操作。
-3. 尽量使用 Schema 中真实存在的表和字段。
-4. 如果需要聚合，请在 SQL 中完成基础聚合。
-5. 返回结果应服务于 evidence_plan 的 expected_result_shape。
-6. 必须严格兼容 MySQL 8 语法，不要使用 PostgreSQL、Oracle、SQL Server、Hive 或 Spark SQL 方言。
-7. 禁止使用 MySQL 不支持的中位数/百分位函数或语法，例如 PERCENTILE_CONT、PERCENTILE_DISC、WITHIN GROUP、APPROX_PERCENTILE、MEDIAN()、QUALIFY。
-8. 如果需要计算中位数，请使用 MySQL 8 窗口函数 ROW_NUMBER() OVER (...) 和 COUNT(*) OVER (...)，选取中间行后 AVG() 得到中位数。
-9. 不要使用 FILTER (WHERE ...)、:: 类型转换、DATE_TRUNC、ILIKE、TOP 等非 MySQL 写法。
-10. 只输出 SQL，不要 Markdown。
-{retry_hint}
-
 用户问题：
 {state["question"]}
 
@@ -102,35 +102,32 @@ class SQLEngineerNode(AgentNode):
 {state.get("analysis_goal", "")}
 
 证据规划：
-{json_dumps(state.get("current_evidence_plan", {}))}
+{state.get("evidence_message") or json_dumps(state.get("current_evidence_plan", {}))}
 
 数据库 Schema：
 {state.get("schema_info", "")}
 
-Skill 计算规则：
-{skill.get("calculations", "")}
+{retry_hint}
 
 SQL：
 """.strip()
 
-    def call_llm(self, prompt: str, state: Dict[str, Any]) -> str:
-        """调用配置好的 LLM 完成 SQL 生成。
+    def build_system_prompt(self, state: Dict[str, Any]) -> str:
+        """构造 SQL 工程师的 system prompt，并加入 Skill 计算规则。
 
         输入:
-            prompt: `build_prompt` 生成的 prompt。
-            state: 当前图状态；此处主要用于保持 AgentNode 接口一致。
+            state: 当前图状态；包含已加载 Skill。
 
         输出:
-            模型返回的原始 SQL 文本。
+            角色规则、SQL 约束和 Skill 计算规则组成的 system prompt。
         """
-        return self.llm_client.complete(
-            prompt=prompt,
-            system_prompt=self.system_prompt,
-            temperature=self.temperature,
-            tools=self.tools,
-            stream=self.stream,
-            timeout=self.timeout,
-        )
+        skill = state.get("skill") or {}
+        return f"""
+{self.system_prompt}
+
+Skill 计算规则：
+{skill.get("calculations", "")}
+""".strip()
 
     def summarize_output(self, output: Dict[str, Any]) -> Optional[str]:
         """生成用于任务步骤日志的 SQL 生成摘要。
@@ -142,3 +139,10 @@ SQL：
             人类可读的简短摘要。
         """
         return f"SQL 生成完成，尝试次数 {output.get('sql_attempts')}。"
+
+    def step_output(self, output: Dict[str, Any]) -> Dict[str, Any]:
+        """Persist the SQL generated in this step for per-step display."""
+        return {
+            "sql": output.get("sql"),
+            "sql_attempts": output.get("sql_attempts"),
+        }

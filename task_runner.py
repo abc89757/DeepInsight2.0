@@ -11,6 +11,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
+from services.task_cancellation import TaskCancelled, cleanup_task_cancel, register_task
+from services.task_events import close_task_events, publish_task_event
+from services.task_tool_registry import close_task_tool_clients
+
 
 STATE_SNAPSHOT_DIR = Path("state_snapshots")
 SENSITIVE_KEYS = {"password", "password_encrypted", "api_key", "token", "secret"}
@@ -114,6 +118,7 @@ def run_analysis_task(task_id: str, request: Any, task_store: Dict[str, Dict[str
     output_dir = Path("outputs") / task_id
     output_dir.mkdir(parents=True, exist_ok=True)
     final_state: Dict[str, Any] = {}
+    register_task(task_id)
 
     try:
         update_task(
@@ -123,6 +128,14 @@ def run_analysis_task(task_id: str, request: Any, task_store: Dict[str, Dict[str
             stage="start",
             message="后台分析流程已启动。",
             error=None,
+        )
+        publish_task_event(
+            task_id,
+            "task_started",
+            {
+                "stage": "start",
+                "message": "后台分析流程已启动。",
+            },
         )
 
         from graph.workflow import build_workflow
@@ -137,11 +150,11 @@ def run_analysis_task(task_id: str, request: Any, task_store: Dict[str, Dict[str
             "status": "running",
             "stage": "start",
             "message": "后台分析流程已启动。",
-            "max_analysis_rounds": 3,
+            "max_analysis_rounds": 1,
             "analysis_round": 0,
             "max_sql_attempts": 3,
             "max_result_rows": None,
-            "chief_decision_history": [],
+            "agent_messages": [],
             "analysis_rounds": [],
             "query_artifacts": [],
         }
@@ -205,6 +218,49 @@ def run_analysis_task(task_id: str, request: Any, task_store: Dict[str, Dict[str
             metadata_path=final_state.get("metadata_path"),
             state_snapshot_path=snapshot_path,
             error=None,
+                )
+        publish_task_event(
+            task_id,
+            "task_finished",
+            {
+                "stage": "finished",
+                "message": "分析任务执行完成。",
+                "report_path": final_state.get("report_path"),
+            },
+        )
+
+    except TaskCancelled as exc:
+        print(f"[task {task_id}] cancelled: {exc}")
+        final_state.update(
+            {
+                "task_id": task_id,
+                "status": "cancelled",
+                "stage": "cancelled",
+                "message": "分析任务已取消。",
+                "error": None,
+            }
+        )
+        save_state_snapshot(
+            task_id,
+            final_state,
+            stage="cancelled",
+            status="cancelled",
+        )
+        update_task(
+            task_store,
+            task_id,
+            status="cancelled",
+            stage="cancelled",
+            message="分析任务已取消。",
+            error=None,
+        )
+        publish_task_event(
+            task_id,
+            "task_cancelled",
+            {
+                "stage": "cancelled",
+                "message": "分析任务已取消。",
+            },
         )
 
     except Exception as exc:
@@ -234,6 +290,19 @@ def run_analysis_task(task_id: str, request: Any, task_store: Dict[str, Dict[str
             error=str(exc),
             state_snapshot_path=snapshot_path,
         )
+        publish_task_event(
+            task_id,
+            "task_failed",
+            {
+                "stage": "failed",
+                "message": "分析任务执行失败。",
+                "error": str(exc),
+            },
+        )
+    finally:
+        close_task_tool_clients(task_id)
+        cleanup_task_cancel(task_id)
+        close_task_events(task_id)
 
 
 def _stage_message(stage: str) -> str:

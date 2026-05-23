@@ -139,26 +139,32 @@
 
         <div class="task-layout">
           <section class="task-main-panel">
-            <section class="task-section">
+            <section class="task-section progress-section" id="progressSection">
               <div class="task-section-title">
-                <h2>执行进度</h2>
+                <div class="task-title-left">
+                  <h2>执行进度</h2>
+                  <button
+                    class="progress-toggle"
+                    id="progressToggleBtn"
+                    type="button"
+                    aria-label="收起执行进度"
+                    aria-expanded="true"
+                    aria-controls="progressPanel"
+                  ></button>
+                </div>
                 <span id="taskUpdatedAt">-</span>
               </div>
-              <div class="steps-list" id="stepsList">
-                <div class="empty-block">暂无步骤信息</div>
+              <div class="progress-panel" id="progressPanel">
+                <div class="steps-list" id="stepsList">
+                  <div class="empty-block">暂无步骤信息</div>
+                </div>
               </div>
             </section>
 
-            <section class="task-section">
-              <div class="task-section-title">
-                <h2>SQL 结果</h2>
-              </div>
-              <pre class="sql-block" id="sqlBlock">暂无 SQL</pre>
-            </section>
-
-            <section class="task-section">
+            <section class="task-section hidden" id="reportSection">
               <div class="task-section-title">
                 <h2>分析报告</h2>
+                <button class="report-pdf-button hidden" id="reportDownloadPdfBtn" type="button">下载 PDF</button>
               </div>
               <article class="report-content" id="reportContent">
                 <div class="empty-block">任务完成后将在这里展示 Markdown 报告。</div>
@@ -166,23 +172,6 @@
             </section>
           </section>
 
-          <aside class="result-side-panel">
-            <div class="result-side-header">
-              <h2>查询数据</h2>
-              <span id="resultRowCount">-</span>
-            </div>
-
-            <div class="result-table-wrap">
-              <table class="result-table" id="resultTable">
-                <thead></thead>
-                <tbody>
-                  <tr>
-                    <td class="empty-table-cell">暂无查询结果</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </aside>
         </div>
       </section>
     </main>

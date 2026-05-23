@@ -1,55 +1,39 @@
 """SQL 审计节点。
 
-这个文件定义只读 SQL 审计 ToolNode，用来在执行前拦截写操作、多语句和明显危险关键字。
+这个文件定义 SQL 运行预检 ToolNode：不做字段或关键字审查，只检查 SQL 是否能运行，
+以及查询结果是否至少返回一行。
 """
 
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, Optional
+
+import pymysql
 
 from graph.nodes.base import ToolNode
 
 
 class AuditSQLNode(ToolNode):
-    """检查 SQL 是否安全可执行的工具节点。"""
+    """通过只读事务运行 SQL，检查是否报错以及结果是否为空的工具节点。"""
 
     name = "audit_sql"
     title = "审计 SQL"
-    description = "检查 SQL 是否只读、安全且没有多语句风险。"
-    dangerous_patterns = [
-        r"\binsert\b",
-        r"\bupdate\b",
-        r"\bdelete\b",
-        r"\bdrop\b",
-        r"\balter\b",
-        r"\btruncate\b",
-        r"\bcreate\b",
-        r"\breplace\b",
-        r"\bgrant\b",
-        r"\brevoke\b",
-        r"\bcall\b",
-        r"\bexec\b",
-        r"\bexecute\b",
-        r"\bload_file\b",
-        r"\boutfile\b",
-        r"\bdumpfile\b",
-    ]
+    description = "运行 SQL 预检，检查是否报错以及查询结果是否为空。"
 
     def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """审计当前 SQL，并决定通过还是打回 SQL 工程师。
 
         输入:
-            state: 当前图状态；需要包含 `sql`，可选包含 `sql_attempts` 和 `max_sql_attempts`。
+            state: 当前图状态；需要包含 `sql` 和 `database`，可选包含 `sql_attempts` 与 `max_sql_attempts`。
         输出:
-            包含 `audit_passed` 和 `audit_message` 的状态更新；如果超过最大重试次数则抛出异常。
+            包含 `audit_passed` 和 `audit_message` 的状态更新；未通过时由 workflow 路由回 SQL 工程师重写。
         """
-        audit_result = self.audit(state["sql"])
+        audit_result = self.audit(sql=state["sql"], conn=state.get("database"))
         if not audit_result["passed"]:
             max_attempts = int(state.get("max_sql_attempts") or 3)
             attempts = int(state.get("sql_attempts") or 0)
             if attempts >= max_attempts:
-                raise ValueError(f"SQL 审计在 {attempts} 次尝试后仍未通过：{audit_result['message']}")
+                raise ValueError(f"SQL 运行预检在 {attempts} 次尝试后仍未通过：{audit_result['message']}")
             return {
                 "audit_passed": False,
                 "audit_message": str(audit_result["message"]),
@@ -59,35 +43,85 @@ class AuditSQLNode(ToolNode):
             "audit_message": str(audit_result["message"]),
         }
 
-    def audit(self, sql: str) -> Dict[str, object]:
-        """执行静态 SQL 安全检查。
+    def audit(self, sql: str, conn: Any = None) -> Dict[str, object]:
+        """执行 SQL 运行预检。
 
         输入:
             sql: 待检查的 SQL 字符串。
+            conn: 数据库连接配置对象。
         输出:
             包含 `passed` 布尔值和 `message` 文本的审计结果。
         """
-        cleaned = (sql or "").strip()
-        lowered = cleaned.lower()
+        if not (sql or "").strip():
+            return {"passed": False, "message": "SQL 为空。"}
+        if conn is None:
+            return {"passed": False, "message": "SQL 运行预检缺少数据库连接。"}
+        return self.runtime_audit(sql, conn)
 
-        if not cleaned:
-            return {"passed": False, "message": "SQL 为空"}
+    def runtime_audit(self, sql: str, conn: Any) -> Dict[str, object]:
+        """在只读事务中运行 SQL，并检查是否至少返回一行。
 
-        if not (lowered.startswith("select") or lowered.startswith("with")):
-            return {"passed": False, "message": "只允许 SELECT / WITH 查询"}
+        输入:
+            sql: 待预检的 SQL。
+            conn: MySQL 连接配置对象。
+        输出:
+            包含 `passed` 布尔值和 `message` 文本的运行预检结果。
+        """
+        if conn.type != "mysql":
+            return {"passed": False, "message": f"SQL 运行预检当前只支持 MySQL，暂不支持 {conn.type}。"}
+        if not conn.database:
+            return {"passed": False, "message": "MySQL 连接缺少 database 参数，无法运行 SQL 预检。"}
 
-        without_tail_semicolon = cleaned[:-1] if cleaned.endswith(";") else cleaned
-        if ";" in without_tail_semicolon:
-            return {"passed": False, "message": "不允许一次执行多条 SQL"}
+        db = None
+        try:
+            db = pymysql.connect(
+                host=conn.host,
+                port=int(conn.port),
+                user=conn.user,
+                password=conn.password,
+                database=conn.database,
+                charset="utf8mb4",
+                connect_timeout=300,
+                read_timeout=300,
+                write_timeout=300,
+                autocommit=False,
+                cursorclass=pymysql.cursors.SSDictCursor,
+            )
+            with db.cursor() as cursor:
+                cursor.execute("START TRANSACTION READ ONLY")
+                cursor.execute(self.remove_tail_semicolon(sql))
+                if cursor.description is None:
+                    return {
+                        "passed": False,
+                        "message": "SQL 运行预检失败：语句没有返回查询结果集。",
+                    }
+                first_row = cursor.fetchone()
+                if first_row is None:
+                    return {
+                        "passed": False,
+                        "message": "SQL 运行预检失败：查询结果为 0 行。",
+                    }
+        except pymysql.MySQLError as exc:
+            return {
+                "passed": False,
+                "message": f"SQL 运行预检失败：{exc}",
+            }
+        finally:
+            if db:
+                db.rollback()
+                db.close()
 
-        for pattern in self.dangerous_patterns:
-            if re.search(pattern, lowered, flags=re.IGNORECASE):
-                return {"passed": False, "message": f"检测到危险关键字：{pattern}"}
+        return {"passed": True, "message": "SQL 运行预检通过：SQL 可运行，且查询结果至少返回 1 行。"}
 
-        return {
-            "passed": True,
-            "message": "SQL 审计通过：查询只读，未发现明显危险关键字。",
-        }
+    def remove_tail_semicolon(self, sql: str) -> str:
+        """去掉 SQL 末尾的分号。
+
+        输入:
+            sql: 原始 SQL 字符串。
+        输出:
+            末尾不带分号的 SQL 字符串。
+        """
+        return (sql or "").strip().removesuffix(";").strip()
 
     def summarize_output(self, output: Dict[str, Any]) -> Optional[str]:
         """生成任务步骤中展示的 SQL 审计摘要。
@@ -97,4 +131,4 @@ class AuditSQLNode(ToolNode):
         输出:
             人类可读的审计摘要。
         """
-        return output.get("audit_message") or "SQL 审计通过。"
+        return output.get("audit_message") or "SQL 运行预检通过。"

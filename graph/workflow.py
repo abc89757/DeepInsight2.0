@@ -16,6 +16,7 @@ from langgraph.graph import END, START, StateGraph
 from graph.nodes import (
     AuditSQLNode,
     ChiefAnalystNode,
+    ChartGeneratorNode,
     DataProcessorNode,
     EvidencePlannerNode,
     ExecuteSQLNode,
@@ -38,12 +39,12 @@ def route_after_chief_analyst(state: Dict[str, Any]) -> str:
         下一个节点名：`report_writer` 或 `evidence_planner`。
     """
     if state.get("director_action") == "ready_for_report":
-        return "report_writer"
+        return "chart_generator"
     return "evidence_planner"
 
 
-def route_after_sql_audit(state: Dict[str, Any]) -> str:
-    """根据 SQL 审计结果选择执行还是重写 SQL。
+def route_after_audit_sql(state: Dict[str, Any]) -> str:
+    """根据 SQL 运行预检结果选择执行 SQL 或返回 SQL 工程师重写。
 
     输入:
         state: 当前图状态；需要包含 `audit_passed`。
@@ -75,6 +76,7 @@ def build_workflow():
     execute_sql = ExecuteSQLNode()
     data_processor = DataProcessorNode()
     insight_analyst = InsightAnalystNode()
+    chart_generator = ChartGeneratorNode()
     report_writer = ReportWriterNode()
 
     graph.add_node(load_schema.name, load_schema)
@@ -87,6 +89,7 @@ def build_workflow():
     graph.add_node(execute_sql.name, execute_sql)
     graph.add_node(data_processor.name, data_processor)
     graph.add_node(insight_analyst.name, insight_analyst)
+    graph.add_node(chart_generator.name, chart_generator)
     graph.add_node(report_writer.name, report_writer)
 
     graph.add_edge(START, load_schema.name)
@@ -99,7 +102,7 @@ def build_workflow():
         route_after_chief_analyst,
         {
             evidence_planner.name: evidence_planner.name,
-            report_writer.name: report_writer.name,
+            chart_generator.name: chart_generator.name,
         },
     )
 
@@ -107,15 +110,16 @@ def build_workflow():
     graph.add_edge(sql_engineer.name, audit_sql.name)
     graph.add_conditional_edges(
         audit_sql.name,
-        route_after_sql_audit,
+        route_after_audit_sql,
         {
-            sql_engineer.name: sql_engineer.name,
             execute_sql.name: execute_sql.name,
+            sql_engineer.name: sql_engineer.name,
         },
     )
     graph.add_edge(execute_sql.name, data_processor.name)
     graph.add_edge(data_processor.name, insight_analyst.name)
     graph.add_edge(insight_analyst.name, chief_analyst.name)
+    graph.add_edge(chart_generator.name, report_writer.name)
     graph.add_edge(report_writer.name, END)
 
     return graph.compile()

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from graph.nodes.base import ToolNode
+from services.task_tool_registry import start_skill_tool_clients
 
 
 def _read_first_existing(paths: List[Path]) -> str:
@@ -51,6 +52,7 @@ class SkillLoaderNode(ToolNode):
         metrics = _read_first_existing([skill_dir / "metrics.md", skill_dir / "指标种类.md"]) or overview
         calculations = _read_first_existing([skill_dir / "calculations.md", skill_dir / "计算指标.md"]) or overview
         analysis = _read_first_existing([skill_dir / "analysis.md", skill_dir / "分析指标.md"]) or overview
+        charts = _read_first_existing([skill_dir / "charts.md", skill_dir / "鍥捐〃.md"])
         report_template = _read_first_existing(
             [skill_dir / "report_template.md", skill_dir / "报告模板.md"]
         )
@@ -64,12 +66,19 @@ class SkillLoaderNode(ToolNode):
             "metrics": metrics,
             "calculations": calculations,
             "analysis": analysis,
+            "charts": charts,
             "report_template": report_template,
         }
+        tool_groups = start_skill_tool_clients(
+            task_id=str(state.get("task_id")) if state.get("task_id") else None,
+            skill_name=skill_name,
+            skill_dir=skill_dir,
+        )
         return {
             "selected_skill_name": skill_name,
             "skill": skill,
             "report_template": report_template,
+            "skill_tool_groups": tool_groups,
         }
 
     def summarize_output(self, output: Dict[str, Any]) -> Optional[str]:

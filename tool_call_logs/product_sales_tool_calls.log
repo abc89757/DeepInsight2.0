@@ -1,0 +1,6 @@
+2026-05-23T17:16:46 Hello World from product_sales data tool. test_argument=data_processor_validation_2025
+2026-05-23T17:59:12 [get_rows] file_path=C:\Users\NihaoA\AppData\Local\Temp\product_sales_tool_test.csv, filter=brand:BMW, sort=price:desc
+2026-05-23T17:59:12 [profile_value_ratio] file_path=C:\Users\NihaoA\AppData\Local\Temp\product_sales_tool_test.csv, column_name=brand, top_n=20
+2026-05-23T17:59:12 [profile_format_ratio] file_path=C:\Users\NihaoA\AppData\Local\Temp\product_sales_tool_test.csv, column_name=date
+2026-05-23T17:59:12 [add_columns_sum] file_path=C:\Users\NihaoA\AppData\Local\Temp\product_sales_tool_test.csv, price+fee->total
+2026-05-23T18:37:50 [get_rows] file_path=outputs\c5f8c55be1094e6abd98b61dc196905b\q001_result.csv, filter=None:None, sort=None:desc

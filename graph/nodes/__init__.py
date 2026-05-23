@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from graph.nodes.ChiefAnalystNode import ChiefAnalystNode
+from graph.nodes.ChartGeneratorNode import ChartGeneratorNode
 from graph.nodes.DataProcessorNode import DataProcessorNode
 from graph.nodes.EvidencePlannerNode import EvidencePlannerNode
 from graph.nodes.InsightAnalystNode import InsightAnalystNode
@@ -24,6 +25,7 @@ __all__ = [
     "AuditSQLNode",
     "BaseNode",
     "ChiefAnalystNode",
+    "ChartGeneratorNode",
     "DataProcessorNode",
     "EvidencePlannerNode",
     "ExecuteSQLNode",

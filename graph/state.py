@@ -36,16 +36,16 @@ class GraphState(TypedDict, total=False):
     max_sql_attempts: int
     max_result_rows: Optional[int]
 
-    chief_decision: Dict[str, Any]
-    chief_decision_history: List[Dict[str, Any]]
+    agent_messages: List[Dict[str, Any]]
+    chief_message: str
     director_action: str
     analysis_goal: str
 
     current_query_id: str
+    evidence_message: str
     current_evidence_plan: Dict[str, Any]
     sql_attempts: int
     sql: str
-    current_sql: str
 
     audit_passed: bool
     audit_message: str
@@ -58,12 +58,18 @@ class GraphState(TypedDict, total=False):
     result_truncated: bool
     query_artifacts: List[Dict[str, Any]]
 
+    data_message: str
     current_processed_data: Dict[str, Any]
-    current_data_issue: List[str]
+    current_data_issue: str
+    insight_message: str
     current_insight: Dict[str, Any]
-    current_analysis_issue: List[str]
+    current_analysis_issue: str
     current_analysis_round: Dict[str, Any]
     analysis_rounds: List[Dict[str, Any]]
+
+    chart_message: str
+    chart_artifacts: List[Dict[str, Any]]
+    chart_issues: List[str]
 
     analysis_result: str
     report: str

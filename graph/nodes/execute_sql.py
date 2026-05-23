@@ -37,6 +37,7 @@ class ExecuteSQLNode(ToolNode):
             query_id=query_id,
             max_rows=state.get("max_result_rows"),
         )
+        result["sql"] = state["sql"]
 
         artifacts = list(state.get("query_artifacts", []))
         artifacts.append(
@@ -173,6 +174,7 @@ class ExecuteSQLNode(ToolNode):
             包含预览、列、行数、文件路径和 artifact 历史的简短字典。
         """
         return {
+            "sql": output.get("sql"),
             "result_preview": output.get("result_preview", []),
             "result_columns": output.get("result_columns", []),
             "result_row_count": output.get("result_row_count", 0),

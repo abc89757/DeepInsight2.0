@@ -46,11 +46,12 @@ const taskQuestion = document.getElementById("taskQuestion");
 const taskStatus = document.getElementById("taskStatus");
 const taskStage = document.getElementById("taskStage");
 const taskUpdatedAt = document.getElementById("taskUpdatedAt");
+const progressSection = document.getElementById("progressSection");
+const progressToggleBtn = document.getElementById("progressToggleBtn");
 const stepsList = document.getElementById("stepsList");
-const sqlBlock = document.getElementById("sqlBlock");
+const reportSection = document.getElementById("reportSection");
+const reportDownloadPdfBtn = document.getElementById("reportDownloadPdfBtn");
 const reportContent = document.getElementById("reportContent");
-const resultRowCount = document.getElementById("resultRowCount");
-const resultTable = document.getElementById("resultTable");
 
 const heroSection = document.querySelector(".hero-section");
 const featureStrip = document.querySelector(".feature-strip");
@@ -58,10 +59,48 @@ const featureStrip = document.querySelector(".feature-strip");
 let toastTimer = null;
 let currentTaskId = null;
 let taskPollTimer = null;
+let taskEventSource = null;
+let taskEventSourceClosedExpected = false;
+let liveTaskSteps = [];
+let currentReportMarkdown = "";
 let databaseConnections = [];
 let managedConnections = [];
 let isSidebarCollapsed = false;
+let isProgressCollapsed = false;
+const collapsedStepSummaries = new Set();
 const connectionDetailCache = new Map();
+const STAGE_ORDER_MAP = {
+  waiting: 0,
+  database_precheck: 1,
+  load_schema: 2,
+  skill_advisor: 3,
+  skill_loader: 4,
+  chief_analyst: 5,
+  evidence_planner: 6,
+  sql_engineer: 7,
+  audit_sql: 8,
+  execute_sql: 9,
+  data_processor: 10,
+  insight_analyst: 11,
+  report_writer: 12,
+  finished: 13,
+};
+const STAGE_TITLE_MAP = {
+  waiting: "等待执行",
+  database_precheck: "数据库连接检查",
+  load_schema: "读取数据库 Schema",
+  skill_advisor: "选择 Skill",
+  skill_loader: "加载 Skill",
+  chief_analyst: "首席分析师决策",
+  evidence_planner: "规划证据",
+  sql_engineer: "生成 SQL",
+  audit_sql: "SQL 审计",
+  execute_sql: "执行 SQL",
+  data_processor: "处理数据",
+  insight_analyst: "分析洞察",
+  report_writer: "生成报告",
+  finished: "任务完成",
+};
 const TRASH_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
     <path d="M3 6h18"></path>
@@ -550,6 +589,18 @@ function setSidebarCollapsed(collapsed) {
   sidebarCollapseBtn.setAttribute("aria-expanded", String(!collapsed));
 }
 
+function setProgressCollapsed(collapsed) {
+  isProgressCollapsed = collapsed;
+  progressSection.classList.toggle("collapsed", collapsed);
+  progressToggleBtn.setAttribute("aria-expanded", String(!collapsed));
+  progressToggleBtn.setAttribute("aria-label", collapsed ? "展开执行进度" : "收起执行进度");
+}
+
+function isTaskFinishedForReport(task, stage) {
+  const status = task?.status;
+  return status === "succeeded" || status === "failed" || stage === "finished";
+}
+
 function handleBrandClick() {
   if (isSidebarCollapsed) {
     setSidebarCollapsed(false);
@@ -562,6 +613,8 @@ function handleBrandClick() {
 function showHomeView() {
   currentTaskId = null;
   stopTaskPolling();
+  stopTaskEvents();
+  liveTaskSteps = [];
 
   queryInput.value = "";
   charCounter.textContent = "0 / 2000";
@@ -793,15 +846,22 @@ function normalizeTaskDetail(result) {
 async function selectTask(taskId) {
   if (!taskId) return;
 
+  stopTaskEvents();
+  stopTaskPolling();
   currentTaskId = taskId;
+  liveTaskSteps = [];
   setActiveTaskCard(taskId);
   showTaskView();
 
   renderLoadingTaskDetail();
 
   try {
-    await loadTaskDetail(taskId);
-    startTaskPolling(taskId);
+    const detail = await loadTaskDetail(taskId);
+    const task = normalizeTask(detail.task || {});
+    const stage = detail.task?.stage || detail.task?.current_stage;
+    if (!isTaskFinishedForReport(task, stage)) {
+      startTaskEvents(taskId);
+    }
   } catch (error) {
     showToast(`任务详情加载失败：${error.message}`);
     console.error("任务详情加载失败：", error);
@@ -812,7 +872,7 @@ async function loadTaskDetail(taskId) {
   const result = await getJson(`${API_BASE_URL}/analyst_task/tasks_info/${taskId}`);
   const detail = normalizeTaskDetail(result);
 
-  renderTaskDetail(detail);
+  renderTaskDetail(detail, { preserveLiveSteps: Boolean(taskEventSource) });
 
   const status = detail.task?.status;
   const stage = detail.task?.stage || detail.task?.current_stage;
@@ -824,7 +884,9 @@ async function loadTaskDetail(taskId) {
     stage === "finished"
   ) {
     stopTaskPolling();
+    stopTaskEvents();
   }
+  return detail;
 }
 
 function renderLoadingTaskDetail() {
@@ -834,20 +896,26 @@ function renderLoadingTaskDetail() {
   taskStage.textContent = "-";
   taskUpdatedAt.textContent = "-";
   stepsList.innerHTML = `<div class="empty-block">正在加载步骤信息...</div>`;
-  sqlBlock.textContent = "正在加载 SQL...";
-  reportContent.innerHTML = `<div class="empty-block">正在加载报告...</div>`;
-  renderResultTable(null);
+  reportSection.classList.add("hidden");
+  reportContent.innerHTML = "";
+  currentReportMarkdown = "";
+  reportDownloadPdfBtn.classList.add("hidden");
 }
 
-function renderTaskDetail(detail) {
+function renderTaskDetail(detail, options = {}) {
   const rawTask = detail.task || {};
   const task = normalizeTask(rawTask);
 
-  const steps = detail.steps && detail.steps.length > 0
+  const sourceSteps = detail.steps && detail.steps.length > 0
     ? detail.steps
     : buildStepsFromTask(rawTask);
+  if (!options.preserveLiveSteps || liveTaskSteps.length === 0) {
+    liveTaskSteps = cloneSteps(sourceSteps);
+  }
+  const steps = options.preserveLiveSteps && liveTaskSteps.length > 0
+    ? liveTaskSteps
+    : sourceSteps;
 
-  const queryResult = detail.query_result || buildQueryResultFromTask(rawTask);
   const report = detail.report || buildReportFromTask(rawTask);
 
   taskTitle.textContent = task.title;
@@ -858,9 +926,17 @@ function renderTaskDetail(detail) {
   taskUpdatedAt.textContent = `更新时间：${formatTime(task.updated_at || rawTask.finished_at || rawTask.created_at)}`;
 
   renderSteps(steps);
-  renderSql(queryResult, steps);
-  renderReport(report, task.status);
-  renderResultTable(queryResult);
+
+  if (isTaskFinishedForReport(task, rawTask.stage || rawTask.current_stage)) {
+    reportSection.classList.remove("hidden");
+    renderReport(report, task.status);
+  } else {
+    reportSection.classList.add("hidden");
+    reportContent.innerHTML = "";
+    currentReportMarkdown = "";
+    reportDownloadPdfBtn.classList.add("hidden");
+  }
+
 }
 
 function renderSteps(steps) {
@@ -874,49 +950,166 @@ function renderSteps(steps) {
   steps
     .slice()
     .sort((a, b) => (a.step_order || 0) - (b.step_order || 0))
-    .forEach((step) => {
+    .forEach((step, index) => {
       const item = document.createElement("article");
-      item.className = `step-item ${getStatusClass(step.status)}`;
+      const stepKey = getStepKey(step, index);
+      const isSummaryExpanded = !collapsedStepSummaries.has(stepKey);
+      item.className = `step-item ${getStatusClass(step.status)}${isSummaryExpanded ? " summary-expanded" : ""}`;
+      item.dataset.stepKey = stepKey;
+      item.dataset.stepOrder = String(step.step_order || "");
+      item.dataset.stepName = step.step_name || "";
+
+      const summary = step.output_summary || step.input_summary || "暂无阶段摘要";
 
       item.innerHTML = `
         <div class="step-index">${step.step_order || "-"}</div>
         <div class="step-body">
           <div class="step-top">
-            <strong>${escapeHtml(step.step_title || step.step_name || "未命名步骤")}</strong>
+            <div class="step-name-row">
+              <strong>${escapeHtml(step.step_title || step.step_name || "未命名步骤")}</strong>
+              <button
+                class="step-summary-toggle"
+                type="button"
+                aria-label="${isSummaryExpanded ? "收起总结" : "展开完整总结"}"
+                aria-expanded="${isSummaryExpanded}"
+                title="${isSummaryExpanded ? "收起总结" : "展开完整总结"}"
+              ></button>
+            </div>
             <span>${getStatusText(step.status)}</span>
           </div>
-          <p>${escapeHtml(step.output_summary || step.input_summary || "暂无阶段摘要")}</p>
+          <div class="step-summary markdown-content">${simpleMarkdownToHtml(summary)}</div>
+          <div class="step-extra">${renderStepExtraHtml(step)}</div>
           ${step.error_message ? `<div class="step-error">${escapeHtml(step.error_message)}</div>` : ""}
         </div>
       `;
 
+      item.querySelector(".step-summary-toggle").addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (collapsedStepSummaries.has(stepKey)) {
+          collapsedStepSummaries.delete(stepKey);
+          item.classList.add("summary-expanded");
+          event.currentTarget.setAttribute("aria-expanded", "true");
+          event.currentTarget.setAttribute("aria-label", "收起总结");
+          event.currentTarget.title = "收起总结";
+        } else {
+          collapsedStepSummaries.add(stepKey);
+          item.classList.remove("summary-expanded");
+          event.currentTarget.setAttribute("aria-expanded", "false");
+          event.currentTarget.setAttribute("aria-label", "展开完整总结");
+          event.currentTarget.title = "展开完整总结";
+        }
+      });
+
       stepsList.appendChild(item);
     });
+
+  requestAnimationFrame(updateStepSummaryToggles);
 }
 
-function renderSql(queryResult, steps) {
-  if (queryResult && queryResult.sql_text) {
-    sqlBlock.textContent = queryResult.sql_text;
-    return;
+function getStepOutput(step) {
+  if (!step || !step.output_json) return null;
+  return typeof step.output_json === "string"
+    ? safeParseJson(step.output_json)
+    : step.output_json;
+}
+
+function getStepSql(step) {
+  if (!step || step.step_name !== "sql_engineer") return "";
+  const output = getStepOutput(step);
+  return output && output.sql ? String(output.sql).trim() : "";
+}
+
+function renderStepExtraHtml(step) {
+  const sql = getStepSql(step);
+  if (!sql) return "";
+
+  return `
+    <div class="step-sql">
+      <div class="step-sql-title">本次生成 SQL</div>
+      <pre class="step-sql-block"><code>${escapeHtml(sql)}</code></pre>
+    </div>
+  `;
+}
+
+function getStepKey(step, index = 0) {
+  return `${currentTaskId || "task"}-${step.step_order || index}-${step.step_name || step.step_title || "step"}`;
+}
+
+function updateRenderedStep(step) {
+  const item = step.step_order
+    ? stepsList.querySelector(`[data-step-order="${step.step_order}"]`)
+    : stepsList.querySelector(`[data-step-name="${step.step_name || ""}"]`);
+  if (!item) {
+    return false;
   }
 
-  const sqlStep = steps.find((step) => {
-    const name = step.step_name || "";
-    return name.includes("sql");
-  });
+  const stepKey = item.dataset.stepKey || getStepKey(step);
+  const isSummaryExpanded = !collapsedStepSummaries.has(stepKey);
+  item.className = `step-item ${getStatusClass(step.status)}${isSummaryExpanded ? " summary-expanded" : ""}`;
+  item.dataset.stepKey = stepKey;
+  item.dataset.stepOrder = String(step.step_order || "");
+  item.dataset.stepName = step.step_name || "";
 
-  if (sqlStep && sqlStep.output_json) {
-    const output = typeof sqlStep.output_json === "string"
-      ? safeParseJson(sqlStep.output_json)
-      : sqlStep.output_json;
+  const index = item.querySelector(".step-index");
+  if (index) {
+    index.textContent = step.step_order || "-";
+  }
 
-    if (output && output.sql) {
-      sqlBlock.textContent = output.sql;
+  const title = item.querySelector(".step-name-row strong");
+  if (title) {
+    title.textContent = step.step_title || step.step_name || "未命名步骤";
+  }
+
+  const status = item.querySelector(".step-top > span");
+  if (status) {
+    status.textContent = getStatusText(step.status);
+  }
+
+  const summary = item.querySelector(".step-summary");
+  if (summary) {
+    summary.innerHTML = simpleMarkdownToHtml(step.output_summary || step.input_summary || "暂无阶段摘要");
+  }
+
+  const extra = item.querySelector(".step-extra");
+  if (extra) {
+    extra.innerHTML = renderStepExtraHtml(step);
+  }
+
+  const body = item.querySelector(".step-body");
+  let error = item.querySelector(".step-error");
+  if (step.error_message) {
+    if (!error && body) {
+      error = document.createElement("div");
+      error.className = "step-error";
+      body.appendChild(error);
+    }
+    if (error) {
+      error.textContent = step.error_message;
+    }
+  } else if (error) {
+    error.remove();
+  }
+
+  requestAnimationFrame(updateStepSummaryToggles);
+  return true;
+}
+
+function updateStepSummaryToggles() {
+  stepsList.querySelectorAll(".step-item").forEach((item) => {
+    const summary = item.querySelector(".step-summary");
+    const toggle = item.querySelector(".step-summary-toggle");
+    if (!summary || !toggle) return;
+
+    const isExpanded = item.classList.contains("summary-expanded");
+    const stepKey = item.dataset.stepKey || "";
+    if (isExpanded) {
+      item.classList.add("summary-toggle-visible");
       return;
     }
-  }
 
-  sqlBlock.textContent = "暂无 SQL";
+    const needsToggle = summary.scrollHeight > summary.clientHeight + 2;
+    item.classList.toggle("summary-toggle-visible", needsToggle || collapsedStepSummaries.has(stepKey));
+  });
 }
 
 function renderReport(report, taskStatusValue) {
@@ -926,64 +1119,284 @@ function renderReport(report, taskStatusValue) {
       : "任务完成后将在这里展示 Markdown 报告。";
 
     reportContent.innerHTML = `<div class="empty-block">${text}</div>`;
+    currentReportMarkdown = "";
+    reportDownloadPdfBtn.classList.add("hidden");
     return;
   }
 
+  currentReportMarkdown = report.markdown_content;
   reportContent.innerHTML = simpleMarkdownToHtml(report.markdown_content);
+  reportDownloadPdfBtn.classList.remove("hidden");
 }
 
-function renderResultTable(queryResult) {
-  const thead = resultTable.querySelector("thead");
-  const tbody = resultTable.querySelector("tbody");
-
-  thead.innerHTML = "";
-  tbody.innerHTML = "";
-
-  if (!queryResult) {
-    resultRowCount.textContent = "-";
-    tbody.innerHTML = `<tr><td class="empty-table-cell">暂无查询结果</td></tr>`;
+function downloadReportPdf() {
+  if (!currentReportMarkdown || !reportContent.innerHTML.trim()) {
+    showToast("当前没有可下载的报告内容");
     return;
   }
 
-  const columns = normalizeJsonValue(queryResult.columns_json) || [];
-  const rows = normalizeJsonValue(queryResult.preview_rows_json) || [];
-
-  resultRowCount.textContent = queryResult.row_count != null
-    ? `共 ${queryResult.row_count} 行`
-    : `${rows.length} 行预览`;
-
-  if (!columns.length || !rows.length) {
-    tbody.innerHTML = `<tr><td class="empty-table-cell">暂无查询结果</td></tr>`;
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) {
+    showToast("浏览器阻止了下载窗口，请允许弹出窗口后重试");
     return;
   }
 
-  const headRow = document.createElement("tr");
-  columns.forEach((column) => {
-    const th = document.createElement("th");
-    th.textContent = column;
-    headRow.appendChild(th);
-  });
-  thead.appendChild(headRow);
+  const reportTitleText = taskTitle.textContent || "DeepInsight 分析报告";
+  const html = `
+    <!doctype html>
+    <html lang="zh-CN">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(reportTitleText)}</title>
+        <style>
+          @page { size: A4; margin: 16mm 14mm; }
+          body {
+            margin: 0;
+            color: #172b52;
+            font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif;
+            font-size: 13px;
+            line-height: 1.72;
+            background: #fff;
+          }
+          h1, h2, h3, h4 { color: #0f2d63; page-break-after: avoid; }
+          h1 { font-size: 24px; margin: 0 0 14px; }
+          h2 { font-size: 19px; margin: 20px 0 10px; }
+          h3 { font-size: 16px; margin: 16px 0 8px; }
+          p { margin: 8px 0; }
+          table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 11px; page-break-inside: avoid; }
+          th, td { border: 1px solid #d9e3f2; padding: 7px 8px; text-align: left; vertical-align: top; }
+          th { background: #f2f6fc; color: #0f2d63; }
+          img { display: block; max-width: 100%; max-height: 150mm; object-fit: contain; page-break-inside: avoid; }
+          figure { margin: 14px 0; page-break-inside: avoid; }
+          figcaption { margin-top: 6px; color: #5e6f89; font-size: 11px; }
+          blockquote { margin: 10px 0; padding: 8px 12px; border-left: 3px solid #9fc4ff; background: #f7faff; color: #4d607d; }
+          code { padding: 1px 4px; border-radius: 4px; background: #edf4ff; color: #0f3f8c; }
+          .pdf-header { margin-bottom: 18px; padding-bottom: 10px; border-bottom: 1px solid #dce6f5; }
+          .pdf-subtitle { margin: 0; color: #64748b; font-size: 12px; }
+        </style>
+      </head>
+      <body>
+        <section class="pdf-header">
+          <h1>${escapeHtml(reportTitleText)}</h1>
+          <p class="pdf-subtitle">${escapeHtml(taskQuestion.textContent || "")}</p>
+        </section>
+        <main>${reportContent.innerHTML}</main>
+      </body>
+    </html>
+  `;
 
-  rows.forEach((row) => {
-    const tr = document.createElement("tr");
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
 
-    if (Array.isArray(row)) {
-      row.forEach((cell) => {
-        const td = document.createElement("td");
-        td.textContent = cell == null ? "" : String(cell);
-        tr.appendChild(td);
-      });
-    } else {
-      columns.forEach((column) => {
-        const td = document.createElement("td");
-        td.textContent = row[column] == null ? "" : String(row[column]);
-        tr.appendChild(td);
-      });
+  const triggerPrint = () => {
+    const images = Array.from(printWindow.document.images || []);
+    Promise.all(
+      images.map((image) => {
+        if (image.complete) return Promise.resolve();
+        return new Promise((resolve) => {
+          image.onload = resolve;
+          image.onerror = resolve;
+        });
+      })
+    ).then(() => {
+      printWindow.focus();
+      printWindow.print();
+    });
+  };
+
+  if (printWindow.document.readyState === "complete") {
+    triggerPrint();
+  } else {
+    printWindow.onload = triggerPrint;
+  }
+}
+
+/* =========================
+   SSE 实时事件
+========================= */
+
+function startTaskEvents(taskId) {
+  stopTaskEvents();
+
+  if (!window.EventSource) {
+    console.error("当前浏览器不支持 EventSource，无法使用 SSE 实时更新。");
+    return;
+  }
+
+  taskEventSourceClosedExpected = false;
+  taskEventSource = new EventSource(`${API_BASE_URL}/analyst_task/tasks_info/${taskId}/events`);
+
+  taskEventSource.addEventListener("task_started", handleTaskEvent);
+  taskEventSource.addEventListener("node_started", handleTaskEvent);
+  taskEventSource.addEventListener("agent_delta", handleTaskEvent);
+  taskEventSource.addEventListener("agent_message", handleTaskEvent);
+  taskEventSource.addEventListener("node_finished", handleTaskEvent);
+  taskEventSource.addEventListener("node_failed", handleTaskEvent);
+  taskEventSource.addEventListener("task_finished", handleTaskEvent);
+  taskEventSource.addEventListener("task_failed", handleTaskEvent);
+  taskEventSource.addEventListener("task_cancelled", handleTaskEvent);
+
+  taskEventSource.onerror = () => {
+    if (taskEventSourceClosedExpected || !currentTaskId || currentTaskId !== taskId) {
+      return;
     }
+    console.error("SSE 连接异常，已停止实时更新。");
+    stopTaskEvents();
+  };
+}
 
-    tbody.appendChild(tr);
-  });
+function stopTaskEvents() {
+  taskEventSourceClosedExpected = true;
+  if (taskEventSource) {
+    taskEventSource.close();
+    taskEventSource = null;
+  }
+}
+
+async function handleTaskEvent(event) {
+  const data = parseSseData(event.data);
+  if (!data || data.task_id !== currentTaskId) {
+    return;
+  }
+
+  if (data.type === "task_started") {
+    updateTaskHeaderStatus("running", data.message || "后台分析流程已启动。");
+    return;
+  }
+
+  if (data.type === "node_started") {
+    updateTaskHeaderStatus("running", data.summary || data.title || "节点开始执行。");
+    upsertLiveStep(data.node, {
+      step_number: data.step_number,
+      status: "running",
+      step_title: data.title,
+      output_summary: data.summary || data.title || "",
+    });
+    return;
+  }
+
+  if (data.type === "agent_delta" || data.type === "agent_message") {
+    if (data.node === "report_writer") {
+      return;
+    }
+    upsertLiveStep(data.node, {
+      step_number: data.step_number,
+      status: "running",
+      step_title: data.title,
+      output_summary: data.summary || "",
+    });
+    return;
+  }
+
+  if (data.type === "node_finished") {
+    upsertLiveStep(data.node, {
+      step_number: data.step_number,
+      status: "succeeded",
+      step_title: data.title,
+      output_summary: data.summary || "",
+      output_json: data.output || null,
+    });
+    return;
+  }
+
+  if (data.type === "node_failed") {
+    updateTaskHeaderStatus("failed", data.error || "节点执行失败。");
+    upsertLiveStep(data.node, {
+      step_number: data.step_number,
+      status: "failed",
+      step_title: data.title,
+      error_message: data.error || "节点执行失败。",
+    });
+    return;
+  }
+
+  if (data.type === "task_finished") {
+    updateTaskHeaderStatus("succeeded", data.message || "分析任务执行完成。");
+    taskEventSourceClosedExpected = true;
+    stopTaskEvents();
+    await refreshFinalTaskDetail(data.task_id);
+    return;
+  }
+
+  if (data.type === "task_failed" || data.type === "task_cancelled") {
+    updateTaskHeaderStatus(data.type === "task_failed" ? "failed" : "cancelled", data.message || "");
+    taskEventSourceClosedExpected = true;
+    stopTaskEvents();
+    await refreshFinalTaskDetail(data.task_id);
+  }
+}
+
+function parseSseData(rawData) {
+  try {
+    return JSON.parse(rawData);
+  } catch (error) {
+    console.error("SSE 事件解析失败：", error, rawData);
+    return null;
+  }
+}
+
+function updateTaskHeaderStatus(status, message) {
+  taskStatus.textContent = getStatusText(status);
+  taskStatus.className = getStatusClass(status);
+  if (message) {
+    taskStage.textContent = message;
+  }
+  taskUpdatedAt.textContent = `更新时间：${formatTime(new Date().toISOString())}`;
+}
+
+function upsertLiveStep(nodeName, patch) {
+  if (!nodeName) return;
+
+  const runtimeStepNumber = Number(patch.step_number || 0) || null;
+  const stepOrder = runtimeStepNumber || STAGE_ORDER_MAP[nodeName] || liveTaskSteps.length + 1;
+  const stepTitle = patch.step_title || STAGE_TITLE_MAP[nodeName] || nodeName;
+  const existingIndex = runtimeStepNumber
+    ? liveTaskSteps.findIndex((step) => Number(step.step_order) === runtimeStepNumber)
+    : liveTaskSteps.findIndex((step) => step.step_name === nodeName);
+  const nextStep = {
+    step_order: stepOrder,
+    step_name: nodeName,
+    step_title: stepTitle,
+    status: "running",
+    input_summary: "",
+    output_summary: "",
+    output_json: null,
+    error_message: null,
+    ...(existingIndex >= 0 ? liveTaskSteps[existingIndex] : {}),
+    ...patch,
+    step_order: stepOrder,
+    step_name: nodeName,
+    step_title: stepTitle,
+  };
+  delete nextStep.step_number;
+
+  if (existingIndex >= 0) {
+    liveTaskSteps[existingIndex] = nextStep;
+  } else {
+    liveTaskSteps.push(nextStep);
+  }
+
+  if (!updateRenderedStep(nextStep)) {
+    const previousScrollTop = stepsList.scrollTop;
+    renderSteps(liveTaskSteps);
+    stepsList.scrollTop = previousScrollTop;
+  }
+}
+
+async function refreshFinalTaskDetail(taskId) {
+  if (!taskId || currentTaskId !== taskId) return;
+  try {
+    liveTaskSteps = [];
+    await loadTaskDetail(taskId);
+    await loadTaskList();
+  } catch (error) {
+    console.error("刷新最终任务详情失败：", error);
+  }
+}
+
+function cloneSteps(steps) {
+  return (steps || []).map((step) => ({ ...step }));
 }
 
 /* =========================
@@ -1036,44 +1449,6 @@ function safeParseJson(value) {
   }
 }
 
-function normalizeJsonValue(value) {
-  if (!value) return null;
-  if (typeof value === "string") return safeParseJson(value);
-  return value;
-}
-
-function buildQueryResultFromTask(task) {
-  if (!task) return null;
-
-  const sql = task.sql;
-  const rows = task.result_preview || [];
-
-  if (!sql && (!rows || rows.length === 0)) {
-    return null;
-  }
-
-  let columns = [];
-
-  if (rows.length > 0) {
-    const firstRow = rows[0];
-
-    if (Array.isArray(firstRow)) {
-      columns = firstRow.map((_, index) => `col_${index + 1}`);
-    } else if (typeof firstRow === "object" && firstRow !== null) {
-      columns = Object.keys(firstRow);
-    }
-  }
-
-  return {
-    sql_text: sql || "",
-    columns_json: columns,
-    preview_rows_json: rows,
-    row_count: task.result_row_count ?? rows.length,
-    preview_row_count: rows.length,
-  };
-}
-
-
 function buildReportFromTask(task) {
   if (!task || !task.report) {
     return null;
@@ -1105,46 +1480,12 @@ function buildStepsFromTask(task) {
   const stage = task.stage || task.current_stage || "waiting";
   const message = task.message || "任务正在执行中";
 
-  const stageOrderMap = {
-    waiting: 0,
-    database_precheck: 1,
-    load_schema: 2,
-    skill_advisor: 3,
-    skill_loader: 4,
-    chief_analyst: 5,
-    evidence_planner: 6,
-    sql_engineer: 7,
-    audit_sql: 8,
-    execute_sql: 9,
-    data_processor: 10,
-    insight_analyst: 11,
-    report_writer: 12,
-    finished: 13,
-  };
+  const currentOrder = STAGE_ORDER_MAP[stage] ?? 0;
 
-  const stageTitleMap = {
-    waiting: "等待执行",
-    database_precheck: "数据库连接检查",
-    load_schema: "读取数据库 Schema",
-    skill_advisor: "选择 Skill",
-    skill_loader: "加载 Skill",
-    chief_analyst: "首席分析师决策",
-    evidence_planner: "规划证据",
-    sql_engineer: "生成 SQL",
-    audit_sql: "SQL 审计",
-    execute_sql: "执行 SQL",
-    data_processor: "处理数据",
-    insight_analyst: "分析洞察",
-    report_writer: "生成报告",
-    finished: "任务完成",
-  };
-
-  const currentOrder = stageOrderMap[stage] ?? 0;
-
-  const steps = Object.entries(stageTitleMap)
+  const steps = Object.entries(STAGE_TITLE_MAP)
     .filter(([name]) => name !== "waiting")
     .map(([name, title]) => {
-      const order = stageOrderMap[name];
+      const order = STAGE_ORDER_MAP[name];
 
       let status = "pending";
       if (task.status === "succeeded" || stage === "finished") {
@@ -1171,34 +1512,177 @@ function buildStepsFromTask(task) {
 }
 
 function simpleMarkdownToHtml(markdown) {
-  const escaped = escapeHtml(markdown);
+  const lines = String(markdown || "").replace(/\r\n/g, "\n").split("\n");
+  const html = [];
+  let listType = null;
+  let inCodeBlock = false;
+  let codeLanguage = "";
+  let codeLines = [];
 
-  return escaped
-    .split("\n")
-    .map((line) => {
-      if (line.startsWith("### ")) {
-        return `<h3>${line.slice(4)}</h3>`;
+  const closeList = () => {
+    if (listType) {
+      html.push(`</${listType}>`);
+      listType = null;
+    }
+  };
+
+  const openList = (type) => {
+    if (listType === type) return;
+    closeList();
+    listType = type;
+    html.push(`<${type}>`);
+  };
+
+  const flushCodeBlock = () => {
+    html.push(
+      `<pre class="md-code-block"><code${codeLanguage ? ` class="language-${escapeHtml(codeLanguage)}"` : ""}>${escapeHtml(codeLines.join("\n"))}</code></pre>`
+    );
+    inCodeBlock = false;
+    codeLanguage = "";
+    codeLines = [];
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index];
+    const line = rawLine.trim();
+
+    if (line.startsWith("```")) {
+      if (inCodeBlock) {
+        flushCodeBlock();
+      } else {
+        closeList();
+        inCodeBlock = true;
+        codeLanguage = line.slice(3).trim();
+        codeLines = [];
       }
+      continue;
+    }
 
-      if (line.startsWith("## ")) {
-        return `<h2>${line.slice(3)}</h2>`;
+    if (inCodeBlock) {
+      codeLines.push(rawLine);
+      continue;
+    }
+
+    if (!line) {
+      closeList();
+      continue;
+    }
+
+    if (/^\|?.+\|.+\|?$/.test(line) && lines[index + 1] && /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(lines[index + 1].trim())) {
+      closeList();
+      const headerCells = parseMarkdownTableRow(line);
+      const rows = [];
+      index += 2;
+
+      while (index < lines.length && /^\|?.+\|.+\|?$/.test(lines[index].trim())) {
+        rows.push(parseMarkdownTableRow(lines[index].trim()));
+        index += 1;
       }
+      index -= 1;
 
-      if (line.startsWith("# ")) {
-        return `<h1>${line.slice(2)}</h1>`;
-      }
+      html.push(`
+        <div class="md-table-wrap">
+          <table class="md-table">
+            <thead>
+              <tr>${headerCells.map((cell) => `<th>${renderInlineMarkdown(cell)}</th>`).join("")}</tr>
+            </thead>
+            <tbody>
+              ${rows.map((row) => `<tr>${headerCells.map((_, cellIndex) => `<td>${renderInlineMarkdown(row[cellIndex] || "")}</td>`).join("")}</tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+      `);
+      continue;
+    }
 
-      if (line.startsWith("- ")) {
-        return `<p class="md-list-item">• ${line.slice(2)}</p>`;
-      }
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+    if (headingMatch) {
+      closeList();
+      const level = Math.min(headingMatch[1].length, 6);
+      html.push(`<h${level}>${renderInlineMarkdown(headingMatch[2])}</h${level}>`);
+      continue;
+    }
 
-      if (!line.trim()) {
-        return `<br />`;
-      }
+    if (/^---+$/.test(line)) {
+      closeList();
+      html.push("<hr />");
+      continue;
+    }
 
-      return `<p>${line}</p>`;
-    })
-    .join("");
+    const imageMatch = line.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (imageMatch) {
+      closeList();
+      const alt = imageMatch[1] || "图表";
+      const src = normalizeMarkdownImageSrc(imageMatch[2]);
+      html.push(
+        `<figure class="md-image-wrap"><img class="md-image" src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" loading="lazy" /><figcaption>${escapeHtml(alt)}</figcaption></figure>`
+      );
+      continue;
+    }
+
+    const unorderedMatch = line.match(/^[-*+]\s+(.+)$/);
+    if (unorderedMatch) {
+      openList("ul");
+      html.push(`<li>${renderInlineMarkdown(unorderedMatch[1])}</li>`);
+      continue;
+    }
+
+    const orderedMatch = line.match(/^\d+\.\s+(.+)$/);
+    if (orderedMatch) {
+      openList("ol");
+      html.push(`<li>${renderInlineMarkdown(orderedMatch[1])}</li>`);
+      continue;
+    }
+
+    if (line.startsWith("> ")) {
+      closeList();
+      html.push(`<blockquote>${renderInlineMarkdown(line.slice(2))}</blockquote>`);
+      continue;
+    }
+
+    closeList();
+    html.push(`<p>${renderInlineMarkdown(line)}</p>`);
+  }
+
+  closeList();
+  if (inCodeBlock) {
+    flushCodeBlock();
+  }
+
+  return html.join("");
+}
+
+function parseMarkdownTableRow(line) {
+  return line
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function renderInlineMarkdown(text) {
+  return escapeHtml(text)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([^_]+)__/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+    .replace(/_([^_]+)_/g, "<em>$1</em>");
+}
+
+function normalizeMarkdownImageSrc(src) {
+  const rawSrc = String(src || "").trim();
+  if (!rawSrc) {
+    return "";
+  }
+  if (/^(https?:)?\/\//i.test(rawSrc) || rawSrc.startsWith("data:")) {
+    return rawSrc;
+  }
+
+  const normalized = rawSrc.replace(/\\/g, "/").replace(/^\.?\//, "");
+  const outputsIndex = normalized.toLowerCase().indexOf("outputs/");
+  const relativePath = outputsIndex >= 0 ? normalized.slice(outputsIndex) : normalized;
+  const apiOrigin = API_BASE_URL.replace(/\/api\/?$/, "");
+  return `${apiOrigin}/${relativePath.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 /* =========================
@@ -1214,6 +1698,8 @@ startAnalyzeBtn.addEventListener("click", createAnalyzeTask);
 openDbModalBtn.addEventListener("click", openModal);
 brandHomeBtn.addEventListener("click", handleBrandClick);
 sidebarCollapseBtn.addEventListener("click", () => setSidebarCollapsed(true));
+progressToggleBtn.addEventListener("click", () => setProgressCollapsed(!isProgressCollapsed));
+reportDownloadPdfBtn.addEventListener("click", downloadReportPdf);
 closeDbModalBtn.addEventListener("click", closeModal);
 addConnectionBtn.addEventListener("click", showAddConnectionView);
 backToDbListBtn.addEventListener("click", showManageConnectionsView);

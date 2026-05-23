@@ -4,10 +4,14 @@ from typing import Any, Dict
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi.responses import StreamingResponse
 
 from schemas import AnalysisTaskContext, CreateTaskRequest, TaskResponse
 from services.database_service import get_database_connection_by_id, precheck_database_for_task
+from services.task_cancellation import register_task, request_task_cancel
+from services.task_events import format_sse_event, subscribe_task_events
 from services.task_execution import run_analysis_task_with_persistence
+from services.task_tool_registry import close_task_tool_clients
 from services.task_persistence import (
     delete_task_from_db,
     get_task_detail_from_db,
@@ -67,6 +71,7 @@ def create_analysis_task(
 
     insert_database_precheck_step(task_id, precheck_result)
 
+    register_task(task_id)
     TASK_STORE[task_id] = task
 
     background_tasks.add_task(
@@ -101,9 +106,30 @@ def get_task(task_id: str) -> Dict[str, Any]:
     return get_task_detail_from_db(task_id)
 
 
+@router.get("/tasks_info/{task_id}/events")
+def stream_task_events(task_id: str) -> StreamingResponse:
+    """通过 SSE 推送指定分析任务的实时执行事件。"""
+
+    def event_generator():
+        for event in subscribe_task_events(task_id):
+            yield format_sse_event(event)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.delete("/tasks_info/{task_id}")
 def delete_task(task_id: str) -> Dict[str, Any]:
     """删除一个分析任务。"""
+    request_task_cancel(task_id)
+    close_task_tool_clients(task_id)
     delete_task_from_db(task_id)
     return {
         "success": True,
