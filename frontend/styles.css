@@ -1372,7 +1372,7 @@ textarea:focus {
 ========================= */
 
 .steps-list {
-  max-height: 430px;
+  max-height: 860px;
   overflow: auto;
   padding-right: 4px;
   display: flex;

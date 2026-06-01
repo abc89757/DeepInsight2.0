@@ -4,3 +4,13 @@
 2026-05-23T17:59:12 [profile_format_ratio] file_path=C:\Users\NihaoA\AppData\Local\Temp\product_sales_tool_test.csv, column_name=date
 2026-05-23T17:59:12 [add_columns_sum] file_path=C:\Users\NihaoA\AppData\Local\Temp\product_sales_tool_test.csv, price+fee->total
 2026-05-23T18:37:50 [get_rows] file_path=outputs\c5f8c55be1094e6abd98b61dc196905b\q001_result.csv, filter=None:None, sort=None:desc
+2026-05-31T22:52:56 [get_rows] file_path=/home/user/Projects/task_manager/data/car_sell_top_models.csv, filter=None:None, sort=sales_count:desc
+2026-05-31T22:52:56 [get_rows] error=文件不存在：/home/user/Projects/task_manager/data/car_sell_top_models.csv
+2026-05-31T22:53:02 [get_rows] file_path=/home/user/Projects/task_manager/data/car_sell.csv, filter=None:None, sort=None:desc
+2026-05-31T22:53:02 [get_rows] error=文件不存在：/home/user/Projects/task_manager/data/car_sell.csv
+2026-05-31T22:54:20 [get_rows] file_path=/home/user/Projects/task_manager/data/car_sell_processed.csv, filter=None:None, sort=None:desc
+2026-05-31T22:54:20 [get_rows] error=文件不存在：/home/user/Projects/task_manager/data/car_sell_processed.csv
+2026-05-31T22:54:33 [get_rows] file_path=/home/user/Projects/task_manager/data/car_sell.csv, filter=None:None, sort=None:desc
+2026-05-31T22:54:33 [get_rows] error=文件不存在：/home/user/Projects/task_manager/data/car_sell.csv
+2026-05-31T22:54:50 [get_rows] file_path=/home/user/Projects/task_manager/data/car_sell.csv, filter=None:None, sort=None:desc
+2026-05-31T22:54:50 [get_rows] error=文件不存在：/home/user/Projects/task_manager/data/car_sell.csv

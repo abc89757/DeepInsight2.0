@@ -61,6 +61,11 @@ class GraphState(TypedDict, total=False):
     data_message: str
     current_processed_data: Dict[str, Any]
     current_data_issue: str
+    processor_action: str
+    current_data_request: str
+    data_request_attempts: int
+    max_data_request_attempts: int
+    current_metric_result: Dict[str, Any]
     insight_message: str
     current_insight: Dict[str, Any]
     current_analysis_issue: str

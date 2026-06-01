@@ -31,7 +31,7 @@ class ChartGeneratorNode(AgentNode):
 默认最多规划或生成 3 张图。
 """.strip()
     temperature = 0.2
-    use_stream = False
+    use_stream = True
 
     def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """生成图表计划，并整理工具实际生成的图表产物。

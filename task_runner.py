@@ -153,6 +153,8 @@ def run_analysis_task(task_id: str, request: Any, task_store: Dict[str, Dict[str
             "max_analysis_rounds": 1,
             "analysis_round": 0,
             "max_sql_attempts": 3,
+            "max_data_request_attempts": 3,
+            "data_request_attempts": 0,
             "max_result_rows": None,
             "agent_messages": [],
             "analysis_rounds": [],
@@ -324,6 +326,6 @@ def _stage_message(stage: str) -> str:
         "execute_sql": "正在执行 SQL 并保存结果...",
         "data_processor": "数据处理师正在处理查询结果...",
         "insight_analyst": "洞察分析师正在沉淀本轮发现...",
-        "report_writer": "报告撰写人正在生成结构化报告...",
+        "report_writer": "正在根据分析结果生成报告。。。",
     }
     return mapping.get(stage, f"正在执行节点：{stage}")

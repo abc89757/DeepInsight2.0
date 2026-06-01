@@ -4,3 +4,7 @@
 2026-05-23T21:12:43 [draw_bar_chart] file_path=C:\Users\NihaoA\AppData\Local\Temp\chart_font_test.csv, x=state, y=sales
 2026-05-23T21:38:24 [draw_bar_chart] file_path=outputs\1f41223290654ef3b708e69570fcf817\q001_result.csv, x=state, y=median_transaction_price
 2026-05-23T21:38:24 [draw_bar_chart] file_path=outputs\1f41223290654ef3b708e69570fcf817\q001_result.csv, x=state, y=total_sales_amount
+2026-05-31T18:15:34 [draw_pie_chart] file_path=outputs\8641ee3c741746068c79696dba3292e3\q001_result.csv, label=state, value=amount_share
+2026-05-31T18:15:34 [draw_bar_chart] file_path=outputs\8641ee3c741746068c79696dba3292e3\q001_result.csv, x=state, y=avg_price
+2026-05-31T18:15:34 [draw_bar_chart] file_path=outputs\8641ee3c741746068c79696dba3292e3\q001_result.csv, x=state, y=total_amount
+2026-06-01T20:33:16 [draw_bar_chart] file_path=outputs\cc58ee579aea4b46b08f5bce99d25ff9\q001_result.csv, x=make, y=sales_cnt

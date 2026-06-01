@@ -56,6 +56,16 @@ def route_after_audit_sql(state: Dict[str, Any]) -> str:
     return "sql_engineer"
 
 
+def route_after_data_processor(state: Dict[str, Any]) -> str:
+    """Route after the data processor decides whether more data is needed."""
+    action = state.get("processor_action")
+    if action == "need_sql_data":
+        return "sql_engineer"
+    if action == "metrics_ready":
+        return "insight_analyst"
+    return "insight_analyst"
+
+
 def build_workflow():
     """构建并编译数据分析 LangGraph。
 
@@ -106,7 +116,15 @@ def build_workflow():
         },
     )
 
-    graph.add_edge(evidence_planner.name, sql_engineer.name)
+    graph.add_edge(evidence_planner.name, data_processor.name)
+    graph.add_conditional_edges(
+        data_processor.name,
+        route_after_data_processor,
+        {
+            sql_engineer.name: sql_engineer.name,
+            insight_analyst.name: insight_analyst.name,
+        },
+    )
     graph.add_edge(sql_engineer.name, audit_sql.name)
     graph.add_conditional_edges(
         audit_sql.name,
@@ -117,7 +135,6 @@ def build_workflow():
         },
     )
     graph.add_edge(execute_sql.name, data_processor.name)
-    graph.add_edge(data_processor.name, insight_analyst.name)
     graph.add_edge(insight_analyst.name, chief_analyst.name)
     graph.add_edge(chart_generator.name, report_writer.name)
     graph.add_edge(report_writer.name, END)

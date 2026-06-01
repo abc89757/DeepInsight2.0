@@ -69,6 +69,8 @@ let isSidebarCollapsed = false;
 let isProgressCollapsed = false;
 const collapsedStepSummaries = new Set();
 const connectionDetailCache = new Map();
+const STEPS_BOTTOM_THRESHOLD = 96;
+const REPORT_WRITER_PROGRESS_TEXT = "正在根据分析结果生成报告。。。";
 const STAGE_ORDER_MAP = {
   waiting: 0,
   database_precheck: 1,
@@ -930,6 +932,9 @@ function renderTaskDetail(detail, options = {}) {
   if (isTaskFinishedForReport(task, rawTask.stage || rawTask.current_stage)) {
     reportSection.classList.remove("hidden");
     renderReport(report, task.status);
+  } else if (currentReportMarkdown) {
+    reportSection.classList.remove("hidden");
+    renderLiveReport(currentReportMarkdown);
   } else {
     reportSection.classList.add("hidden");
     reportContent.innerHTML = "";
@@ -1031,6 +1036,21 @@ function renderStepExtraHtml(step) {
   `;
 }
 
+function isStepsScrolledToBottom() {
+  return (
+    stepsList.scrollTop + stepsList.clientHeight >=
+    stepsList.scrollHeight - STEPS_BOTTOM_THRESHOLD
+  );
+}
+
+function restoreStepsScroll(wasAtBottom, previousScrollTop) {
+  if (wasAtBottom) {
+    stepsList.scrollTop = stepsList.scrollHeight;
+  } else {
+    stepsList.scrollTop = previousScrollTop;
+  }
+}
+
 function getStepKey(step, index = 0) {
   return `${currentTaskId || "task"}-${step.step_order || index}-${step.step_name || step.step_title || "step"}`;
 }
@@ -1045,6 +1065,8 @@ function updateRenderedStep(step) {
 
   const stepKey = item.dataset.stepKey || getStepKey(step);
   const isSummaryExpanded = !collapsedStepSummaries.has(stepKey);
+  const wasAtBottom = isStepsScrolledToBottom();
+  const previousScrollTop = stepsList.scrollTop;
   item.className = `step-item ${getStatusClass(step.status)}${isSummaryExpanded ? " summary-expanded" : ""}`;
   item.dataset.stepKey = stepKey;
   item.dataset.stepOrder = String(step.step_order || "");
@@ -1091,6 +1113,7 @@ function updateRenderedStep(step) {
   }
 
   requestAnimationFrame(updateStepSummaryToggles);
+  requestAnimationFrame(() => restoreStepsScroll(wasAtBottom, previousScrollTop));
   return true;
 }
 
@@ -1127,6 +1150,30 @@ function renderReport(report, taskStatusValue) {
   currentReportMarkdown = report.markdown_content;
   reportContent.innerHTML = simpleMarkdownToHtml(report.markdown_content);
   reportDownloadPdfBtn.classList.remove("hidden");
+}
+
+function renderLiveReport(markdown) {
+  currentReportMarkdown = markdown || "";
+  reportContent.innerHTML = currentReportMarkdown
+    ? simpleMarkdownToHtml(currentReportMarkdown)
+    : `<div class="empty-block">正在生成报告...</div>`;
+  reportDownloadPdfBtn.classList.add("hidden");
+}
+
+function updateStreamingReport(data) {
+  reportSection.classList.remove("hidden");
+
+  if (data.type === "agent_delta" && data.delta) {
+    renderLiveReport(`${currentReportMarkdown}${data.delta}`);
+    return;
+  }
+
+  if (data.summary) {
+    renderLiveReport(data.summary);
+    return;
+  }
+
+  renderLiveReport(currentReportMarkdown);
 }
 
 function downloadReportPdf() {
@@ -1267,17 +1314,29 @@ async function handleTaskEvent(event) {
 
   if (data.type === "node_started") {
     updateTaskHeaderStatus("running", data.summary || data.title || "节点开始执行。");
+    if (data.node === "report_writer") {
+      renderLiveReport(currentReportMarkdown);
+    }
     upsertLiveStep(data.node, {
       step_number: data.step_number,
       status: "running",
       step_title: data.title,
-      output_summary: data.summary || data.title || "",
+      output_summary: data.node === "report_writer"
+        ? REPORT_WRITER_PROGRESS_TEXT
+        : data.summary || data.title || "",
     });
     return;
   }
 
   if (data.type === "agent_delta" || data.type === "agent_message") {
     if (data.node === "report_writer") {
+      updateStreamingReport(data);
+      upsertLiveStep(data.node, {
+        step_number: data.step_number,
+        status: "running",
+        step_title: data.title,
+        output_summary: REPORT_WRITER_PROGRESS_TEXT,
+      });
       return;
     }
     upsertLiveStep(data.node, {
@@ -1294,7 +1353,9 @@ async function handleTaskEvent(event) {
       step_number: data.step_number,
       status: "succeeded",
       step_title: data.title,
-      output_summary: data.summary || "",
+      output_summary: data.node === "report_writer"
+        ? REPORT_WRITER_PROGRESS_TEXT
+        : data.summary || "",
       output_json: data.output || null,
     });
     return;
@@ -1377,10 +1438,12 @@ function upsertLiveStep(nodeName, patch) {
     liveTaskSteps.push(nextStep);
   }
 
+  const wasAtBottom = isStepsScrolledToBottom();
+  const previousScrollTop = stepsList.scrollTop;
+
   if (!updateRenderedStep(nextStep)) {
-    const previousScrollTop = stepsList.scrollTop;
     renderSteps(liveTaskSteps);
-    stepsList.scrollTop = previousScrollTop;
+    restoreStepsScroll(wasAtBottom, previousScrollTop);
   }
 }
 

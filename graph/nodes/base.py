@@ -253,8 +253,11 @@ class AgentNode(BaseNode):
             system_prompt=self.build_system_prompt(state),
             name=self.name,
         )
-        if self.use_stream and not self.tools:
-            content = self.stream_agent(agent, state)
+        if self.use_stream:
+            if self.tools:
+                content = asyncio.run(self.astream_agent(agent, state))
+            else:
+                content = self.stream_agent(agent, state)
         else:
             result = self.invoke_agent(agent)
             content = self.extract_agent_content(result)
@@ -358,7 +361,52 @@ class AgentNode(BaseNode):
             message = self.extract_stream_message(event)
             if message is None:
                 continue
-            content = str(getattr(message, "content", "") or "")
+            content = self.message_content_to_text(getattr(message, "content", "") or "")
+            if not content:
+                continue
+            delta = self.get_delta(last_content, content)
+            if not delta:
+                continue
+            last_content = content
+            chunks.append(delta)
+            publish_task_event(
+                task_id,
+                "agent_delta",
+                {
+                    "node": self.name,
+                    "step_number": step_number,
+                    "title": self.title,
+                    "delta": delta,
+                    "summary": "".join(chunks),
+                },
+            )
+        content = "".join(chunks).strip()
+        if not content and not self.tools:
+            result = agent.invoke({"messages": list(self.messages)})
+            content = self.extract_agent_content(result)
+        publish_task_event(
+            task_id,
+            "agent_message",
+            {
+                "node": self.name,
+                "step_number": step_number,
+                "title": self.title,
+                "summary": content,
+            },
+        )
+        return content
+
+    async def astream_agent(self, agent: Any, state: Dict[str, Any]) -> str:
+        """异步流式调用 agent，用于带工具的节点，避免 async-only 工具走同步 invoke。"""
+        task_id = str(state.get("task_id")) if state.get("task_id") else None
+        step_number = state.get("_node_output_step")
+        chunks: list[str] = []
+        last_content = ""
+        async for event in agent.astream({"messages": list(self.messages)}, stream_mode="messages"):
+            message = self.extract_stream_message(event)
+            if message is None:
+                continue
+            content = self.message_content_to_text(getattr(message, "content", "") or "")
             if not content:
                 continue
             delta = self.get_delta(last_content, content)
@@ -379,7 +427,7 @@ class AgentNode(BaseNode):
             )
         content = "".join(chunks).strip()
         if not content:
-            result = agent.invoke({"messages": list(self.messages)})
+            result = await agent.ainvoke({"messages": list(self.messages)})
             content = self.extract_agent_content(result)
         publish_task_event(
             task_id,
@@ -392,6 +440,24 @@ class AgentNode(BaseNode):
             },
         )
         return content
+
+    def message_content_to_text(self, content: Any) -> str:
+        """Extract only human-readable text from streamed message content."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    item_type = item.get("type")
+                    if item_type in {None, "text"}:
+                        text = item.get("text") or item.get("content")
+                        if text:
+                            parts.append(str(text))
+            return "".join(parts)
+        return str(content or "")
 
     def extract_stream_message(self, event: Any) -> Any:
         """从 LangChain stream 事件中取出消息对象。
