@@ -301,6 +301,26 @@ def update_task_stage(
             )
 
 
+def update_task_title(task_id: str, title: str) -> None:
+    """Update the display title for one analysis task."""
+    clean_title = (title or "").strip()
+    if not clean_title:
+        return
+
+    with get_system_db() as db:
+        with db.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE analysis_tasks
+                SET
+                    title = %s,
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (clean_title, task_id),
+            )
+
+
 def start_task_step(
     task_id: str,
     step_name: str,

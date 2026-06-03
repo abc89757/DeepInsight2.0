@@ -7,10 +7,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import asyncio
-import os
 from typing import Any, Dict, Optional
 
-from services.llm_client import LLMClient
+from services.llm_factory import create_chat_model
 from services.node_output_store import allocate_node_step, save_node_json, save_node_text
 from services.task_cancellation import raise_if_task_cancelled
 from services.task_events import publish_task_event
@@ -177,23 +176,17 @@ class AgentNode(BaseNode):
     timeout: int = 300
 
     def __init__(self) -> None:
-        """初始化 AgentNode 并创建 LLM 客户端。
+        """初始化 AgentNode 并创建 LangChain chat model。
 
         输入:
             无。
         输出:
-            无返回值，实例上会持有 `llm_client`、LangChain chat model 和消息历史。
+            无返回值，实例上会持有 LangChain chat model 和消息历史。
         """
-        self.llm_client = LLMClient()
-        from langchain_openai import ChatOpenAI
-
-        self.model = ChatOpenAI(
-            model=os.getenv("LLM_MODEL", "deepseek-chat"),
-            base_url=os.getenv("LLM_BASE_URL", "https://api.deepseek.com"),
-            api_key=os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY"),
+        self.model = create_chat_model(
             temperature=self.temperature,
-            timeout=int(os.getenv("LLM_TIMEOUT_SECONDS", str(self.timeout))),
             streaming=True,
+            timeout=self.timeout,
         )
         self.messages: list[dict[str, str]] = []
 
@@ -214,6 +207,58 @@ class AgentNode(BaseNode):
             label,
             raw_output,
         )
+
+    def save_agent_input(
+        self,
+        state: Dict[str, Any],
+        messages: list[dict[str, Any]],
+        system_prompt: Optional[str],
+        tools: list[Any],
+    ) -> None:
+        """保存即将传给 Agent 的输入内容。
+
+        输入:
+            state: 当前图状态；其中包含 BaseNode 注入的节点执行步号。
+            messages: 本轮实际传给 Agent 的 messages，包含节点已有记忆和当前 user message。
+            system_prompt: 本轮 system prompt。
+            tools: 本轮传给 Agent 的工具列表。
+        输出:
+            无返回值；失败时只打印日志，不影响主流程。
+        """
+        task_id = str(state.get("task_id")) if state.get("task_id") else None
+        step_number = state.get("_node_output_step")
+        save_node_text(task_id, step_number, self.name, "system_prompt", system_prompt or "")
+        save_node_json(task_id, step_number, self.name, "messages", messages)
+        save_node_json(
+            task_id,
+            step_number,
+            self.name,
+            "input",
+            {
+                "system_prompt": system_prompt or "",
+                "messages": messages,
+                "tools": [self.describe_tool(tool) for tool in tools],
+                "use_stream": self.use_stream,
+            },
+        )
+
+    def describe_tool(self, tool: Any) -> Dict[str, Any]:
+        """返回适合保存到输入日志里的工具描述。"""
+        args_schema = getattr(tool, "args_schema", None)
+        schema: Any = None
+        if args_schema is not None:
+            try:
+                schema = args_schema.model_json_schema()
+            except Exception:
+                try:
+                    schema = args_schema.schema()
+                except Exception:
+                    schema = str(args_schema)
+        return {
+            "name": getattr(tool, "name", tool.__class__.__name__),
+            "description": getattr(tool, "description", "") or "",
+            "args_schema": schema,
+        }
 
     @abstractmethod
     def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -246,11 +291,15 @@ class AgentNode(BaseNode):
         """
         from langchain.agents import create_agent
 
-        self.messages.append({"role": "user", "content": prompt})
+        tools = self.prepare_tools(state)
+        system_prompt = self.build_system_prompt(state)
+        messages_for_agent = [*self.messages, {"role": "user", "content": prompt}]
+        self.save_agent_input(state, messages_for_agent, system_prompt, tools)
+        self.messages = messages_for_agent
         agent = create_agent(
             model=self.model,
-            tools=self.prepare_tools(state),
-            system_prompt=self.build_system_prompt(state),
+            tools=tools,
+            system_prompt=system_prompt,
             name=self.name,
         )
         if self.use_stream:
@@ -359,6 +408,7 @@ class AgentNode(BaseNode):
         last_content = ""
         for event in agent.stream({"messages": list(self.messages)}, stream_mode="messages"):
             message = self.extract_stream_message(event)
+            print(message)
             if message is None:
                 continue
             content = self.message_content_to_text(getattr(message, "content", "") or "")
@@ -400,20 +450,40 @@ class AgentNode(BaseNode):
         """异步流式调用 agent，用于带工具的节点，避免 async-only 工具走同步 invoke。"""
         task_id = str(state.get("task_id")) if state.get("task_id") else None
         step_number = state.get("_node_output_step")
-        chunks: list[str] = []
-        last_content = ""
+        # 记录不同 message_key 出现的顺序
+        message_order: list[str] = []
+        # 保存每个 message_key 已经累计出的文本
+        message_texts: dict[str, str] = {}
+        # 保存每个 message_key 上一次看到的内容，用于算 delta
+        last_contents: dict[str, str] = {}
+        # 记录哪些 message_key 属于工具调用消息，需要跳过展示
+        tool_call_messages: set[str] = set()
         async for event in agent.astream({"messages": list(self.messages)}, stream_mode="messages"):
             message = self.extract_stream_message(event)
+            print(message)
             if message is None:
                 continue
+            message_key = self.stream_message_key(event, message)
+            if message_key not in message_texts:
+                message_order.append(message_key)
+                message_texts[message_key] = ""
+                last_contents[message_key] = ""
+
+            if self.message_has_tool_call(message):
+                tool_call_messages.add(message_key)
             content = self.message_content_to_text(getattr(message, "content", "") or "")
+
             if not content:
                 continue
-            delta = self.get_delta(last_content, content)
+            delta = self.get_delta(last_contents.get(message_key, ""), content)
             if not delta:
                 continue
-            last_content = content
-            chunks.append(delta)
+            last_contents[message_key] = content
+            message_texts[message_key] = f"{message_texts.get(message_key, '')}{delta}"
+            # 如果当前段消息是工具调用的消息，就不展示
+            if message_key in tool_call_messages:
+                continue
+            # 不然就通过SSE推送事件
             publish_task_event(
                 task_id,
                 "agent_delta",
@@ -422,10 +492,27 @@ class AgentNode(BaseNode):
                     "step_number": step_number,
                     "title": self.title,
                     "delta": delta,
-                    "summary": "".join(chunks),
+                    "summary": message_texts[message_key],
                 },
             )
-        content = "".join(chunks).strip()
+            # print(
+            #     "STREAM_DEBUG",
+            #     {
+            #         "message_key": message_key,
+            #         "message_type": type(message).__name__,
+            #         "has_tool_call": self.message_has_tool_call(message),
+            #         "content_len": len(content),
+            #         "content_head": content[:80],
+            #         "delta_len": len(delta) if "delta" in locals() else None,
+            #     }
+            # )
+        # debug:看一下key的数量
+        for key in message_order:
+            print(key)
+
+
+        # 获取记录的最后一个非工具调用的message文本
+        content = self.latest_stream_text(message_order, message_texts, tool_call_messages)
         if not content:
             result = await agent.ainvoke({"messages": list(self.messages)})
             content = self.extract_agent_content(result)
@@ -440,6 +527,88 @@ class AgentNode(BaseNode):
             },
         )
         return content
+
+    # def stream_message_key(self, event: Any, message: Any) -> str:
+    #     message_id = getattr(message, "id", None)
+    #     if message_id:
+    #         # print("KEY_SOURCE", {"source": "message.id", "value": str(message_id)})
+    #         return str(message_id)
+    #
+    #     if isinstance(message, dict) and message.get("id"):
+    #         print("KEY_SOURCE", {"source": "message['id']", "value": str(message["id"])})
+    #         return str(message["id"])
+    #
+    #     metadata = event[1] if isinstance(event, tuple) and len(event) > 1 and isinstance(event[1], dict) else {}
+    #
+    #     for key in ("message_id", "run_id", "checkpoint_id"):
+    #         if metadata.get(key):
+    #             print("KEY_SOURCE", {"source": f"metadata.{key}", "value": str(metadata[key])})
+    #             return str(metadata[key])
+    #
+    #     print("KEY_SOURCE", {"source": "fallback", "value": "__single_message__"})
+    #     return "__single_message__"
+
+    def stream_message_key(self, event: Any, message: Any) -> str:
+        """为流式消息生成稳定 key，用来区分工具前后多条 assistant message。"""
+        message_id = getattr(message, "id", None)
+        if message_id:
+            return str(message_id)
+        if isinstance(message, dict) and message.get("id"):
+            return str(message["id"])
+        metadata = event[1] if isinstance(event, tuple) and len(event) > 1 and isinstance(event[1], dict) else {}
+        for key in ("message_id", "run_id", "checkpoint_id"):
+            if metadata.get(key):
+                return str(metadata[key])
+        return "__single_message__"
+
+    def message_has_tool_call(self, message: Any) -> bool:
+        """判断当前 assistant message/chunk 是否包含工具调用。"""
+        for attr in ("tool_calls", "tool_call_chunks"):
+            value = getattr(message, attr, None)
+            if value:
+                return True
+        additional_kwargs = getattr(message, "additional_kwargs", None)
+        if isinstance(additional_kwargs, dict) and additional_kwargs.get("tool_calls"):
+            return True
+        if isinstance(message, dict):
+            for key in ("tool_calls", "tool_call_chunks"):
+                if message.get(key):
+                    return True
+            additional = message.get("additional_kwargs")
+            if isinstance(additional, dict) and additional.get("tool_calls"):
+                return True
+        content = getattr(message, "content", None)
+        if content is None and isinstance(message, dict):
+            content = message.get("content")
+        if isinstance(content, list):
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                item_type = item.get("type")
+                if item_type in {"tool_call", "tool_use", "function_call"}:
+                    return True
+                if item.get("tool_calls") or item.get("tool_call_chunks"):
+                    return True
+        return False
+
+    def latest_stream_text(
+        self,
+        message_order: list[str],
+        message_texts: dict[str, str],
+        tool_call_messages: set[str],
+    ) -> str:
+        """返回最后一条不含工具调用的 assistant 文本。"""
+        for message_key in reversed(message_order):
+            if message_key in tool_call_messages:
+                continue
+            text = (message_texts.get(message_key) or "").strip()
+            if text:
+                return text
+        for message_key in reversed(message_order):
+            text = (message_texts.get(message_key) or "").strip()
+            if text:
+                return text
+        return ""
 
     def message_content_to_text(self, content: Any) -> str:
         """Extract only human-readable text from streamed message content."""

@@ -61,10 +61,15 @@ class DataProcessorNode(AgentNode):
             "message": "已记录 DataProcessor 下一步决策。",
         }
 
+    async def choose_processor_action_async(self, action: str) -> Dict[str, str]:
+        """异步记录本次 DataProcessor 执行的路由决策。"""
+        return self.choose_processor_action(action)
+
     def build_decision_tool(self) -> StructuredTool:
         """创建供模型选择下一步动作的小工具。"""
         return StructuredTool.from_function(
             func=self.choose_processor_action,
+            coroutine=self.choose_processor_action_async,
             name="choose_processor_action",
             description=(
                 "选择 DataProcessor 下一步动作。"
@@ -130,15 +135,21 @@ class DataProcessorNode(AgentNode):
         if skill_tools:
             if self.has_query_result(state):
                 prompt = (
-                    "当前已有查询结果，Skill 提供的数据处理工具可在需要时辅助处理这些结果。"
-                    "在最终回答前必须调用 choose_processor_action 选择下一步。\n\n"
-                    + prompt
+                        "当前已有查询结果，Skill 提供的数据处理工具可在需要时辅助处理这些结果。\n"
+                        "你必须在输出任何正式回答内容之前，先调用一次 choose_processor_action 选择下一步。\n"
+                        "注意：choose_processor_action 在本轮节点执行中最多只能调用一次；调用后不得再次调用该工具。\n"
+                        "在调用 choose_processor_action 之前，不要输出【数据情况】、【证据结果】、【初步含义】、【数据缺陷】等正式分析内容。\n"
+                        "工具返回后，请根据工具结果继续完成最终回答；如果仍需补充数据，请在最终回答中说明，不要再次调用 choose_processor_action。\n\n"
+                        + prompt
                 )
             else:
                 prompt = (
-                    "当前还没有查询结果或数据文件。不要调用依赖文件路径、CSV 或查询结果的 Skill 工具；"
-                    "请先判断需要哪些数据，并在最终回答前调用 choose_processor_action 选择下一步。\n\n"
-                    + prompt
+                        "当前还没有查询结果或数据文件。不要调用依赖文件路径、CSV 或查询结果的 Skill 工具。\n"
+                        "你必须在输出任何正式回答内容之前，先调用一次 choose_processor_action 选择下一步。\n"
+                        "注意：choose_processor_action 在本轮节点执行中最多只能调用一次；调用后不得再次调用该工具。\n"
+                        "在调用 choose_processor_action 之前，不要输出【数据情况】、【证据结果】、【初步含义】、【数据缺陷】等正式分析内容。\n"
+                        "工具返回后，请判断当前需要哪些数据，并在最终回答中说明；如果当前没有数据可处理，不要调用依赖文件路径、CSV 或查询结果的 Skill 工具。\n\n"
+                        + prompt
                 )
 
         raw_output = self.call_llm(prompt, state)
@@ -223,6 +234,9 @@ class DataProcessorNode(AgentNode):
 
 本轮分析目标：
 {state.get("analysis_goal", "")}
+
+数据库 Schema / 数据源结构：
+{state.get("schema_info", "")}
 
 EvidencePlanner 给出的指标/证据计划：
 {state.get("evidence_message") or json_dumps(state.get("current_evidence_plan", {}))}

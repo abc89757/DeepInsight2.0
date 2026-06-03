@@ -8,3 +8,18 @@
 2026-05-31T18:15:34 [draw_bar_chart] file_path=outputs\8641ee3c741746068c79696dba3292e3\q001_result.csv, x=state, y=avg_price
 2026-05-31T18:15:34 [draw_bar_chart] file_path=outputs\8641ee3c741746068c79696dba3292e3\q001_result.csv, x=state, y=total_amount
 2026-06-01T20:33:16 [draw_bar_chart] file_path=outputs\cc58ee579aea4b46b08f5bce99d25ff9\q001_result.csv, x=make, y=sales_cnt
+2026-06-02T19:52:52 [draw_bar_chart] file_path=outputs\b5c44a47efc949e2ae139f67acebfd0a\q001_result.csv, x=color, y=avg_odometer
+2026-06-02T19:52:52 [draw_bar_chart] file_path=outputs\b5c44a47efc949e2ae139f67acebfd0a\q001_result.csv, x=color, y=avg_sellingprice
+2026-06-02T19:52:52 [draw_pie_chart] file_path=outputs\b5c44a47efc949e2ae139f67acebfd0a\q001_result.csv, label=color, value=pct_of_total
+2026-06-02T22:31:46 [draw_bar_chart] file_path=outputs\679ddf4044d54ba387d74bac9b8cb530\q001_result.csv, x=brand, y=sales_volume
+ount
+2026-06-02T22:32:03 [draw_bar_chart] file_path=outputs\679ddf4044d54ba387d74bac9b8cb530\q001_result.csv, x=brand, y=avg_selling_price
+2026-06-03T13:05:14 [draw_bar_chart] file_path=outputs\451ebbc5121a466f86f1abad7cb79e81\q001_result.csv, x=model, y=units_sold
+2026-06-03T13:05:27 [draw_bar_chart] file_path=outputs\451ebbc5121a466f86f1abad7cb79e81\q001_result.csv, x=model, y=total_sales_amount
+2026-06-03T13:05:58 [draw_bar_chart] file_path=outputs\451ebbc5121a466f86f1abad7cb79e81\q001_result.csv, x=model, y=units_sold
+2026-06-03T13:06:08 [draw_bar_chart] file_path=outputs\451ebbc5121a466f86f1abad7cb79e81\q001_result.csv, x=model, y=total_sales_amount
+2026-06-03T13:06:25 [draw_bar_chart] file_path=outputs\451ebbc5121a466f86f1abad7cb79e81\q001_result.csv, x=model, y=units_sold
+2026-06-03T13:06:45 [draw_bar_chart] file_path=outputs\451ebbc5121a466f86f1abad7cb79e81\q001_result.csv, x=model, y=units_sold
+2026-06-03T13:07:02 [draw_bar_chart] file_path=outputs\451ebbc5121a466f86f1abad7cb79e81\q001_result.csv, x=model, y=units_sold
+2026-06-03T20:39:59 [draw_bar_chart] file_path=outputs\2ac57e0fc3fe4ece8da8fd44eb161502\q001_result.csv, x=make, y=gross_sales
+2026-06-03T20:39:59 [draw_bar_chart] file_path=outputs\2ac57e0fc3fe4ece8da8fd44eb161502\q001_result.csv, x=make, y=units_sold

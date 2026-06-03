@@ -14,3 +14,4 @@
 2026-05-31T22:54:33 [get_rows] error=文件不存在：/home/user/Projects/task_manager/data/car_sell.csv
 2026-05-31T22:54:50 [get_rows] file_path=/home/user/Projects/task_manager/data/car_sell.csv, filter=None:None, sort=None:desc
 2026-05-31T22:54:50 [get_rows] error=文件不存在：/home/user/Projects/task_manager/data/car_sell.csv
+2026-06-02T19:49:23 [get_rows] file_path=outputs\b5c44a47efc949e2ae139f67acebfd0a\q001_result.csv, filter=None:None, sort=None:desc

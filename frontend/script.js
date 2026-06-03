@@ -1280,6 +1280,7 @@ function startTaskEvents(taskId) {
   taskEventSource.addEventListener("agent_message", handleTaskEvent);
   taskEventSource.addEventListener("node_finished", handleTaskEvent);
   taskEventSource.addEventListener("node_failed", handleTaskEvent);
+  taskEventSource.addEventListener("task_title_updated", handleTaskEvent);
   taskEventSource.addEventListener("task_finished", handleTaskEvent);
   taskEventSource.addEventListener("task_failed", handleTaskEvent);
   taskEventSource.addEventListener("task_cancelled", handleTaskEvent);
@@ -1369,6 +1370,15 @@ async function handleTaskEvent(event) {
       step_title: data.title,
       error_message: data.error || "节点执行失败。",
     });
+    return;
+  }
+
+  if (data.type === "task_title_updated") {
+    if (data.title) {
+      taskTitle.textContent = data.title;
+    }
+    await loadTaskList();
+    setActiveTaskCard(data.task_id);
     return;
   }
 

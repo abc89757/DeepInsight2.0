@@ -227,3 +227,28 @@ CREATE TABLE IF NOT EXISTS reports (
     REFERENCES analysis_tasks(id)
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='DeepInsight 报告表';
+
+
+
+-- =========================================================
+-- 7. 模型配置表
+-- =========================================================
+CREATE TABLE IF NOT EXISTS llm_models (
+  id CHAR(32) PRIMARY KEY COMMENT '模型配置ID，后端生成 uuid4().hex',
+
+  name VARCHAR(100) NOT NULL COMMENT '模型配置名称/展示名，如 qwen-plus',
+  api_model_name VARCHAR(150) NOT NULL COMMENT '实际传给 API 的模型名',
+  base_url VARCHAR(255) NOT NULL COMMENT '模型服务 base_url',
+  api_key_encrypted TEXT NOT NULL COMMENT '加密后的 API Key',
+
+  is_system TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否系统预置模型',
+  status VARCHAR(30) NOT NULL DEFAULT 'available' COMMENT 'available/disabled',
+
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  UNIQUE KEY uk_llm_models_name (name),
+  KEY idx_llm_models_status (status),
+  KEY idx_llm_models_is_system (is_system)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='LLM 模型配置表';
+

@@ -11,12 +11,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
+from services.node_output_store import NODE_OUTPUT_DIR
 from services.task_cancellation import TaskCancelled, cleanup_task_cancel, register_task
 from services.task_events import close_task_events, publish_task_event
 from services.task_tool_registry import close_task_tool_clients
 
 
-STATE_SNAPSHOT_DIR = Path("state_snapshots")
+STATE_SNAPSHOT_FILENAME = "state.json"
 SENSITIVE_KEYS = {"password", "password_encrypted", "api_key", "token", "secret"}
 
 
@@ -70,8 +71,9 @@ def save_state_snapshot(
     输出:
         写入后的 JSON 快照路径字符串。
     """
-    STATE_SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-    snapshot_path = STATE_SNAPSHOT_DIR / f"{task_id}.json"
+    task_output_dir = NODE_OUTPUT_DIR / task_id
+    task_output_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_path = task_output_dir / STATE_SNAPSHOT_FILENAME
     temp_path = snapshot_path.with_suffix(".json.tmp")
     payload = {
         "_snapshot": {
@@ -321,11 +323,11 @@ def _stage_message(stage: str) -> str:
         "skill_loader": "正在加载分析场景规则...",
         "chief_analyst": "首席分析师正在决定下一步分析目标...",
         "evidence_planner": "证据规划师正在规划本轮数据证据...",
+        "data_processor": "数据处理师正在规划数据提取策略...",
         "sql_engineer": "SQL 工程师正在生成 SQL...",
         "audit_sql": "正在审计 SQL...",
         "execute_sql": "正在执行 SQL 并保存结果...",
-        "data_processor": "数据处理师正在处理查询结果...",
         "insight_analyst": "洞察分析师正在沉淀本轮发现...",
-        "report_writer": "正在根据分析结果生成报告。。。",
+        "report_writer": "正在根据分析结果生成报告...",
     }
     return mapping.get(stage, f"正在执行节点：{stage}")

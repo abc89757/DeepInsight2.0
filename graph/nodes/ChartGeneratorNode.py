@@ -49,12 +49,10 @@ class ChartGeneratorNode(AgentNode):
         self.save_raw_llm_output(state, raw_output, label="raw_charts")
         chart_message = (raw_output or "").strip()
         chart_artifacts = self.collect_chart_artifacts(state)
-        chart_issues = self.collect_chart_issues(chart_message, chart_artifacts)
 
         return {
             "chart_message": chart_message,
-            "chart_artifacts": chart_artifacts,
-            "chart_issues": chart_issues,
+            "chart_artifacts": chart_artifacts
         }
 
     def build_prompt(self, state: Dict[str, Any]) -> str:
@@ -171,21 +169,6 @@ Skill 图表规则：
                 }
             )
         return artifacts
-
-    def collect_chart_issues(self, chart_message: str, chart_artifacts: list[Dict[str, Any]]) -> list[str]:
-        """整理图表生成阶段的问题说明。
-
-        输入:
-            chart_message: 图表节点的自然语言输出。
-            chart_artifacts: 已成功生成的图表产物列表。
-        输出:
-            图表相关问题说明列表。
-        """
-        if chart_artifacts:
-            return []
-        if chart_message:
-            return [chart_message]
-        return ["当前没有生成图表。"]
 
     def summarize_output(self, output: Dict[str, Any]) -> Optional[str]:
         """生成用于前端步骤卡片展示的图表节点摘要。

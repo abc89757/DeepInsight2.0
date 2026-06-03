@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import re
 
-from services.llm_client import LLMClient
+from services.llm_factory import invoke_text
 
 
 def generate_task_title(question: str) -> str:
     """Generate a short task title from the user's analysis request."""
     try:
-        raw_title = LLMClient().complete(
+        raw_title = invoke_text(
             prompt=build_task_title_prompt(question),
             system_prompt="你只输出任务标题本身，不输出任何解释。",
             temperature=0.1,
-            timeout=300,
+            timeout=60,
         )
         title = clean_task_title(raw_title)
         if title:

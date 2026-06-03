@@ -73,15 +73,24 @@ def allocate_node_step(task_id: str, node_name: str) -> int:
     task_dir = NODE_OUTPUT_DIR / task_id
     task_dir.mkdir(parents=True, exist_ok=True)
     max_step = 0
-    for path in task_dir.glob("*.json"):
-        match = re.match(r"^(\d{3,})_", path.name)
-        if match:
-            max_step = max(max_step, int(match.group(1)))
-    for path in task_dir.glob("*.txt"):
+    for path in task_dir.iterdir():
         match = re.match(r"^(\d{3,})_", path.name)
         if match:
             max_step = max(max_step, int(match.group(1)))
     return max_step + 1
+
+
+def _node_step_dir(task_id: str, step_number: int, node_name: str) -> Path:
+    """返回当前节点执行步的产物目录。
+
+    输入:
+        task_id: 当前任务 ID。
+        step_number: 当前节点执行步号。
+        node_name: 当前节点名。
+    输出:
+        `node_outputs/{task_id}/{step}_{node_name}` 目录路径。
+    """
+    return NODE_OUTPUT_DIR / task_id / f"{step_number:03d}_{_safe_name(node_name)}"
 
 
 def _write_text_atomic(path: Path, content: str) -> None:
@@ -120,7 +129,7 @@ def save_node_json(
     if not task_id or not step_number:
         return None
     try:
-        path = NODE_OUTPUT_DIR / task_id / f"{step_number:03d}_{_safe_name(node_name)}_{_safe_name(label)}.json"
+        path = _node_step_dir(task_id, int(step_number), node_name) / f"{_safe_name(label)}.json"
         wrapped = {
             "_node_output": {
                 "task_id": task_id,
@@ -159,7 +168,7 @@ def save_node_text(
     if not task_id or not step_number:
         return None
     try:
-        path = NODE_OUTPUT_DIR / task_id / f"{step_number:03d}_{_safe_name(node_name)}_{_safe_name(label)}.txt"
+        path = _node_step_dir(task_id, int(step_number), node_name) / f"{_safe_name(label)}.txt"
         _write_text_atomic(path, content or "")
         return str(path)
     except Exception as exc:
