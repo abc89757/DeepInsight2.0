@@ -1498,6 +1498,74 @@ textarea:focus {
   transform: rotate(0deg);
 }
 
+.step-thought {
+  margin-top: 10px;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+  background: #f4f6f9;
+}
+
+.step-thought-toggle {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border: 0;
+  border-radius: 8px;
+  color: #5e6c80;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.step-thought-toggle::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  transform: rotate(-90deg);
+  transition: transform 0.18s ease;
+}
+
+.step-thought.expanded .step-thought-toggle::before {
+  transform: rotate(0deg);
+}
+
+.step-thought-toggle:hover,
+.step-thought-toggle:focus-visible {
+  color: #243855;
+  background: #eceff4;
+}
+
+.step-thought-content {
+  display: none;
+  padding: 0 11px 10px 23px;
+  color: #697386;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.step-thought.expanded .step-thought-content {
+  display: block;
+}
+
+.step-thought-content p {
+  margin: 0 0 8px;
+}
+
+.step-thought-content p:last-child {
+  margin-bottom: 0;
+}
+
+.step-summary:empty {
+  display: none;
+}
+
 .step-summary {
   max-height: 96px;
   margin-top: 8px;

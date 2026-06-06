@@ -8,6 +8,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 from pydantic import BaseModel
 
+from graph.common.utils import split_think_content
 from schemas import AnalysisTaskContext, DatabaseConnection
 from system_db import (
     encrypt_password,
@@ -131,7 +132,7 @@ def insert_analysis_task(
     precheck_result: Dict[str, Any],
     title: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Insert the task master record into analysis_tasks."""
+    """Insert one analysis task into the common task table and analysis extension table."""
     question = request.question.strip()
     title = (title or "").strip() or (question[:40] if len(question) <= 40 else question[:40] + "...")
     now = now_str()
@@ -169,26 +170,39 @@ def insert_analysis_task(
         with db.cursor() as cursor:
             cursor.execute(
                 """
-                INSERT INTO analysis_tasks (
-                    id, title, question, status, current_stage, message,
-                    connection_id, db_alias_snapshot, db_type_snapshot, db_name_snapshot,
-                    scene, report_depth, latest_state_json,
-                    created_at, updated_at
+                INSERT INTO tasks (
+                    id, task_type, status, current_stage, message,
+                    error_message, created_at, updated_at
                 )
                 VALUES (
-                    %s, %s, %s, %s, %s, %s,
+                    %s, 'analysis', %s, %s, %s,
+                    NULL, NOW(), NOW()
+                )
+                """,
+                (
+                    task_id,
+                    "pending",
+                    "waiting",
+                    task["message"],
+                ),
+            )
+            cursor.execute(
+                """
+                INSERT INTO analysis_tasks (
+                    id, title, question,
+                    connection_id, db_alias_snapshot, db_type_snapshot, db_name_snapshot,
+                    scene, report_depth, latest_state_json
+                )
+                VALUES (
+                    %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s, %s, CAST(%s AS JSON),
-                    NOW(), NOW()
+                    %s, %s, CAST(%s AS JSON)
                 )
                 """,
                 (
                     task_id,
                     title,
                     question,
-                    "pending",
-                    "waiting",
-                    task["message"],
                     connection_id,
                     request.database.alias,
                     request.database.type,
@@ -267,12 +281,12 @@ def update_task_stage(
     message: Optional[str],
     status: str = "running",
 ) -> None:
-    """Update the task headline state when a node starts or the task ends."""
+    """Update the common task headline state when a node starts or the task ends."""
     with get_system_db() as db:
         with db.cursor() as cursor:
             cursor.execute(
                 """
-                UPDATE analysis_tasks
+                UPDATE tasks
                 SET
                     status = %s,
                     current_stage = %s,
@@ -313,11 +327,14 @@ def update_task_title(task_id: str, title: str) -> None:
                 """
                 UPDATE analysis_tasks
                 SET
-                    title = %s,
-                    updated_at = NOW()
+                    title = %s
                 WHERE id = %s
                 """,
                 (clean_title, task_id),
+            )
+            cursor.execute(
+                "UPDATE tasks SET updated_at = NOW() WHERE id = %s",
+                (task_id,),
             )
 
 
@@ -328,7 +345,7 @@ def start_task_step(
     input_summary: Optional[str] = None,
     message: Optional[str] = None,
 ) -> str:
-    """Record that a LangGraph node has started."""
+    """Record that a LangGraph nodes has started."""
     step_id = insert_task_step(
         task_id=task_id,
         step_name=step_name,
@@ -598,6 +615,8 @@ def upsert_report_from_state(task_id: str, state: Dict[str, Any]) -> None:
         markdown_content = str(report)
         summary = None
 
+    markdown_content, _ = split_think_content(markdown_content)
+
     with get_system_db() as db:
         with db.cursor() as cursor:
             cursor.execute(
@@ -661,12 +680,11 @@ def sync_task_state_to_db(task_id: str, state: Dict[str, Any]) -> None:
         with db.cursor() as cursor:
             cursor.execute(
                 """
-                UPDATE analysis_tasks
+                UPDATE tasks
                 SET
                     status = %s,
                     current_stage = %s,
                     message = %s,
-                    latest_state_json = CAST(%s AS JSON),
                     error_message = %s,
                     started_at = CASE
                         WHEN started_at IS NULL AND %s IN ('running', 'succeeded', 'failed')
@@ -685,10 +703,20 @@ def sync_task_state_to_db(task_id: str, state: Dict[str, Any]) -> None:
                     status,
                     current_stage,
                     message,
-                    json_dumps(state),
                     error_message,
                     status,
                     status,
+                    task_id,
+                ),
+            )
+            cursor.execute(
+                """
+                UPDATE analysis_tasks
+                SET latest_state_json = CAST(%s AS JSON)
+                WHERE id = %s
+                """,
+                (
+                    json_dumps(state),
                     task_id,
                 ),
             )
@@ -712,16 +740,18 @@ def list_tasks_from_db(limit: int = 100) -> list:
             cursor.execute(
                 """
                 SELECT
-                    id,
-                    title,
-                    question,
-                    status,
-                    current_stage,
-                    message,
-                    created_at,
-                    updated_at
-                FROM analysis_tasks
-                ORDER BY created_at DESC
+                    t.id,
+                    a.title,
+                    a.question,
+                    t.status,
+                    t.current_stage,
+                    t.message,
+                    t.created_at,
+                    t.updated_at
+                FROM tasks t
+                INNER JOIN analysis_tasks a ON a.id = t.id
+                WHERE t.task_type = 'analysis'
+                ORDER BY t.created_at DESC
                 LIMIT %s
                 """,
                 (limit,),
@@ -744,7 +774,7 @@ def delete_task_from_db(task_id: str) -> None:
 
     with get_system_db() as db:
         with db.cursor() as cursor:
-            cursor.execute("DELETE FROM analysis_tasks WHERE id = %s", (task_id,))
+            cursor.execute("DELETE FROM tasks WHERE id = %s", (task_id,))
             if cursor.rowcount == 0:
                 raise HTTPException(status_code=404, detail="任务不存在")
 
@@ -760,25 +790,27 @@ def get_task_detail_from_db(task_id: str) -> Dict[str, Any]:
             cursor.execute(
                 """
                 SELECT
-                    id,
-                    title,
-                    question,
-                    status,
-                    current_stage,
-                    message,
-                    db_alias_snapshot,
-                    db_type_snapshot,
-                    db_name_snapshot,
-                    scene,
-                    report_depth,
-                    latest_state_json,
-                    error_message,
-                    created_at,
-                    started_at,
-                    finished_at,
-                    updated_at
-                FROM analysis_tasks
-                WHERE id = %s
+                    t.id,
+                    a.title,
+                    a.question,
+                    t.status,
+                    t.current_stage,
+                    t.message,
+                    a.db_alias_snapshot,
+                    a.db_type_snapshot,
+                    a.db_name_snapshot,
+                    a.scene,
+                    a.report_depth,
+                    a.latest_state_json,
+                    t.error_message,
+                    t.created_at,
+                    t.started_at,
+                    t.finished_at,
+                    t.updated_at
+                FROM tasks t
+                INNER JOIN analysis_tasks a ON a.id = t.id
+                WHERE t.id = %s
+                  AND t.task_type = 'analysis'
                 """,
                 (task_id,),
             )

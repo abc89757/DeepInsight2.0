@@ -8,7 +8,8 @@ def create_chat_model(
     model_name: Optional[str] = None,
     temperature: float = 0.2,
     streaming: bool = True,
-    timeout: Optional[int] = None,
+    timeout: Optional[int] = 300,
+    stream_chunk_timeout: Optional[int] = 300,
     **kwargs: Any,
 ) -> Any:
     """Create the shared chat model instance used by agents and simple LLM calls.
@@ -29,6 +30,7 @@ def create_chat_model(
         temperature=temperature,
         timeout=resolved_timeout,
         streaming=streaming,
+        stream_chunk_timeout=stream_chunk_timeout,
         **kwargs,
     )
 

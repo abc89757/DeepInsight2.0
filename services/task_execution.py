@@ -4,7 +4,7 @@ import traceback
 
 from schemas import AnalysisTaskContext
 from system_db import now_str
-from task_runner import run_analysis_task
+from task.analysis_task_runner import run_analysis_task
 from task_store import TASK_STORE
 
 from services.task_persistence import sync_task_state_to_db

@@ -63,13 +63,17 @@ let taskEventSource = null;
 let taskEventSourceClosedExpected = false;
 let liveTaskSteps = [];
 let currentReportMarkdown = "";
+let currentReportRawMarkdown = "";
 let databaseConnections = [];
 let managedConnections = [];
 let isSidebarCollapsed = false;
 let isProgressCollapsed = false;
 const collapsedStepSummaries = new Set();
+const collapsedStepThoughts = new Set();
+const autoCollapsedStepThoughts = new Set();
 const connectionDetailCache = new Map();
 const STEPS_BOTTOM_THRESHOLD = 96;
+const PAGE_BOTTOM_THRESHOLD = 180;
 const REPORT_WRITER_PROGRESS_TEXT = "正在根据分析结果生成报告。。。";
 const STAGE_ORDER_MAP = {
   waiting: 0,
@@ -617,6 +621,10 @@ function showHomeView() {
   stopTaskPolling();
   stopTaskEvents();
   liveTaskSteps = [];
+  collapsedStepThoughts.clear();
+  autoCollapsedStepThoughts.clear();
+  currentReportMarkdown = "";
+  currentReportRawMarkdown = "";
 
   queryInput.value = "";
   charCounter.textContent = "0 / 2000";
@@ -852,6 +860,8 @@ async function selectTask(taskId) {
   stopTaskPolling();
   currentTaskId = taskId;
   liveTaskSteps = [];
+  collapsedStepThoughts.clear();
+  autoCollapsedStepThoughts.clear();
   setActiveTaskCard(taskId);
   showTaskView();
 
@@ -901,6 +911,7 @@ function renderLoadingTaskDetail() {
   reportSection.classList.add("hidden");
   reportContent.innerHTML = "";
   currentReportMarkdown = "";
+  currentReportRawMarkdown = "";
   reportDownloadPdfBtn.classList.add("hidden");
 }
 
@@ -919,6 +930,7 @@ function renderTaskDetail(detail, options = {}) {
     : sourceSteps;
 
   const report = detail.report || buildReportFromTask(rawTask);
+  const displaySteps = withReportThoughtInStep(steps, report);
 
   taskTitle.textContent = task.title;
   taskQuestion.textContent = task.question || "暂无任务问题";
@@ -927,18 +939,17 @@ function renderTaskDetail(detail, options = {}) {
   taskStage.textContent = task.message || task.current_stage || "暂无当前阶段";
   taskUpdatedAt.textContent = `更新时间：${formatTime(task.updated_at || rawTask.finished_at || rawTask.created_at)}`;
 
-  renderSteps(steps);
+  renderSteps(displaySteps);
 
   if (isTaskFinishedForReport(task, rawTask.stage || rawTask.current_stage)) {
-    reportSection.classList.remove("hidden");
     renderReport(report, task.status);
   } else if (currentReportMarkdown) {
-    reportSection.classList.remove("hidden");
     renderLiveReport(currentReportMarkdown);
   } else {
     reportSection.classList.add("hidden");
     reportContent.innerHTML = "";
     currentReportMarkdown = "";
+    currentReportRawMarkdown = "";
     reportDownloadPdfBtn.classList.add("hidden");
   }
 
@@ -964,7 +975,10 @@ function renderSteps(steps) {
       item.dataset.stepOrder = String(step.step_order || "");
       item.dataset.stepName = step.step_name || "";
 
-      const summary = step.output_summary || step.input_summary || "暂无阶段摘要";
+      const summary = getStepSummaryText(step);
+      const thought = getStepThoughtText(step);
+      autoCollapseThoughtAfterBodyStarts(step, stepKey);
+      const isThoughtExpanded = !collapsedStepThoughts.has(stepKey);
 
       item.innerHTML = `
         <div class="step-index">${step.step_order || "-"}</div>
@@ -982,28 +996,14 @@ function renderSteps(steps) {
             </div>
             <span>${getStatusText(step.status)}</span>
           </div>
+          ${renderStepThoughtHtml(stepKey, thought, isThoughtExpanded)}
           <div class="step-summary markdown-content">${simpleMarkdownToHtml(summary)}</div>
           <div class="step-extra">${renderStepExtraHtml(step)}</div>
           ${step.error_message ? `<div class="step-error">${escapeHtml(step.error_message)}</div>` : ""}
         </div>
       `;
 
-      item.querySelector(".step-summary-toggle").addEventListener("click", (event) => {
-        event.stopPropagation();
-        if (collapsedStepSummaries.has(stepKey)) {
-          collapsedStepSummaries.delete(stepKey);
-          item.classList.add("summary-expanded");
-          event.currentTarget.setAttribute("aria-expanded", "true");
-          event.currentTarget.setAttribute("aria-label", "收起总结");
-          event.currentTarget.title = "收起总结";
-        } else {
-          collapsedStepSummaries.add(stepKey);
-          item.classList.remove("summary-expanded");
-          event.currentTarget.setAttribute("aria-expanded", "false");
-          event.currentTarget.setAttribute("aria-label", "展开完整总结");
-          event.currentTarget.title = "展开完整总结";
-        }
-      });
+      attachStepInteractionHandlers(item, stepKey);
 
       stepsList.appendChild(item);
     });
@@ -1036,6 +1036,174 @@ function renderStepExtraHtml(step) {
   `;
 }
 
+function withReportThoughtInStep(steps, report) {
+  if (!Array.isArray(steps) || !report || !report.markdown_content) {
+    return steps;
+  }
+
+  const parsedReport = splitThinkContent(report.markdown_content);
+  if (!parsedReport.thought) {
+    return steps;
+  }
+
+  return steps.map((step) => {
+    if (!step || step.step_name !== "report_writer" || getStepThoughtText(step)) {
+      return step;
+    }
+
+    const output = getStepOutput(step) || {};
+    return {
+      ...step,
+      thought_summary: parsedReport.thought,
+      output_json: {
+        ...output,
+        thought_summary: parsedReport.thought,
+      },
+    };
+  });
+}
+
+function splitThinkContent(value) {
+  const source = String(value || "");
+  const openTag = "<think>";
+  const closeTag = "</think>";
+  let body = "";
+  let thought = "";
+  let index = 0;
+  let inThought = false;
+
+  while (index < source.length) {
+    if (inThought) {
+      const closeIndex = source.indexOf(closeTag, index);
+      if (closeIndex === -1) {
+        thought += source.slice(index);
+        break;
+      }
+      thought += source.slice(index, closeIndex);
+      index = closeIndex + closeTag.length;
+      inThought = false;
+      continue;
+    }
+
+    const openIndex = source.indexOf(openTag, index);
+    const closeIndex = source.indexOf(closeTag, index);
+
+    if (openIndex === -1) {
+      if (closeIndex === -1) {
+        body += source.slice(index);
+        break;
+      }
+      body += source.slice(index, closeIndex);
+      index = closeIndex + closeTag.length;
+      continue;
+    }
+
+    body += source.slice(index, openIndex);
+    index = openIndex + openTag.length;
+    inThought = true;
+  }
+
+  return {
+    body: body.trim(),
+    thought: thought.trim(),
+  };
+}
+
+function getStepSummaryText(step) {
+  const rawSummary = step.output_summary || step.input_summary || "";
+  const parsed = splitThinkContent(rawSummary);
+  const output = getStepOutput(step) || {};
+  const thought = step.thought_summary || output.thought_summary || output.report_thought || parsed.thought || "";
+  return parsed.body || (thought ? "" : "暂无阶段摘要");
+}
+
+function getStepThoughtText(step) {
+  const rawSummary = step.output_summary || step.input_summary || "";
+  const parsed = splitThinkContent(rawSummary);
+  const output = getStepOutput(step) || {};
+  const thought = step.thought_summary || output.thought_summary || output.report_thought || parsed.thought || "";
+  return String(thought).trim();
+}
+
+function shouldAutoCollapseThought(step) {
+  return Boolean(getStepThoughtText(step) && getStepSummaryText(step));
+}
+
+function autoCollapseThoughtAfterBodyStarts(step, stepKey) {
+  if (!shouldAutoCollapseThought(step) || autoCollapsedStepThoughts.has(stepKey)) {
+    return;
+  }
+
+  collapsedStepThoughts.add(stepKey);
+  autoCollapsedStepThoughts.add(stepKey);
+}
+
+function renderStepThoughtHtml(stepKey, thought, isExpanded) {
+  if (!thought) return "";
+
+  return `
+    <div class="step-thought${isExpanded ? " expanded" : ""}">
+      <button
+        class="step-thought-toggle"
+        type="button"
+        aria-label="${isExpanded ? "收起思考过程" : "展开思考过程"}"
+        aria-expanded="${isExpanded}"
+        title="${isExpanded ? "收起思考过程" : "展开思考过程"}"
+      >
+        <span>思考过程</span>
+      </button>
+      <div class="step-thought-content markdown-content">${simpleMarkdownToHtml(thought)}</div>
+    </div>
+  `;
+}
+
+function attachStepInteractionHandlers(item, stepKey) {
+  const summaryToggle = item.querySelector(".step-summary-toggle");
+  if (summaryToggle && summaryToggle.dataset.bound !== "true") {
+    summaryToggle.dataset.bound = "true";
+    summaryToggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (collapsedStepSummaries.has(stepKey)) {
+        collapsedStepSummaries.delete(stepKey);
+        item.classList.add("summary-expanded");
+        event.currentTarget.setAttribute("aria-expanded", "true");
+        event.currentTarget.setAttribute("aria-label", "收起总结");
+        event.currentTarget.title = "收起总结";
+      } else {
+        collapsedStepSummaries.add(stepKey);
+        item.classList.remove("summary-expanded");
+        event.currentTarget.setAttribute("aria-expanded", "false");
+        event.currentTarget.setAttribute("aria-label", "展开完整总结");
+        event.currentTarget.title = "展开完整总结";
+      }
+    });
+  }
+
+  const thoughtToggle = item.querySelector(".step-thought-toggle");
+  if (thoughtToggle && thoughtToggle.dataset.bound !== "true") {
+    thoughtToggle.dataset.bound = "true";
+    thoughtToggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const thoughtBlock = item.querySelector(".step-thought");
+      if (!thoughtBlock) return;
+
+      if (collapsedStepThoughts.has(stepKey)) {
+        collapsedStepThoughts.delete(stepKey);
+        thoughtBlock.classList.add("expanded");
+        event.currentTarget.setAttribute("aria-expanded", "true");
+        event.currentTarget.setAttribute("aria-label", "收起思考过程");
+        event.currentTarget.title = "收起思考过程";
+      } else {
+        collapsedStepThoughts.add(stepKey);
+        thoughtBlock.classList.remove("expanded");
+        event.currentTarget.setAttribute("aria-expanded", "false");
+        event.currentTarget.setAttribute("aria-label", "展开思考过程");
+        event.currentTarget.title = "展开思考过程";
+      }
+    });
+  }
+}
+
 function isStepsScrolledToBottom() {
   return (
     stepsList.scrollTop + stepsList.clientHeight >=
@@ -1049,6 +1217,35 @@ function restoreStepsScroll(wasAtBottom, previousScrollTop) {
   } else {
     stepsList.scrollTop = previousScrollTop;
   }
+}
+
+function getPageScrollElement() {
+  return document.scrollingElement || document.documentElement;
+}
+
+function isPageScrolledToBottom() {
+  const scrollElement = getPageScrollElement();
+  return (
+    window.scrollY + window.innerHeight >=
+    scrollElement.scrollHeight - PAGE_BOTTOM_THRESHOLD
+  );
+}
+
+function restorePageScroll(wasAtBottom, previousScrollTop) {
+  const scrollElement = getPageScrollElement();
+  const top = wasAtBottom ? scrollElement.scrollHeight : previousScrollTop;
+  window.scrollTo(0, top);
+}
+
+function preservePageScrollAfterRender(renderCallback) {
+  const wasAtBottom = isPageScrolledToBottom();
+  const previousScrollTop = window.scrollY || getPageScrollElement().scrollTop || 0;
+
+  renderCallback();
+
+  requestAnimationFrame(() => {
+    restorePageScroll(wasAtBottom, previousScrollTop);
+  });
 }
 
 function getStepKey(step, index = 0) {
@@ -1089,13 +1286,31 @@ function updateRenderedStep(step) {
 
   const summary = item.querySelector(".step-summary");
   if (summary) {
-    summary.innerHTML = simpleMarkdownToHtml(step.output_summary || step.input_summary || "暂无阶段摘要");
+    summary.innerHTML = simpleMarkdownToHtml(getStepSummaryText(step));
+  }
+
+  const thought = getStepThoughtText(step);
+  autoCollapseThoughtAfterBodyStarts(step, stepKey);
+  const isThoughtExpanded = !collapsedStepThoughts.has(stepKey);
+  const thoughtHtml = renderStepThoughtHtml(stepKey, thought, isThoughtExpanded);
+  const existingThought = item.querySelector(".step-thought");
+
+  if (thoughtHtml) {
+    if (existingThought) {
+      existingThought.outerHTML = thoughtHtml;
+    } else if (summary) {
+      summary.insertAdjacentHTML("beforebegin", thoughtHtml);
+    }
+  } else if (existingThought) {
+    existingThought.remove();
   }
 
   const extra = item.querySelector(".step-extra");
   if (extra) {
     extra.innerHTML = renderStepExtraHtml(step);
   }
+
+  attachStepInteractionHandlers(item, stepKey);
 
   const body = item.querySelector(".step-body");
   let error = item.querySelector(".step-error");
@@ -1136,44 +1351,53 @@ function updateStepSummaryToggles() {
 }
 
 function renderReport(report, taskStatusValue) {
-  if (!report || !report.markdown_content) {
-    const text = taskStatusValue === "succeeded"
-      ? "任务已完成，但后端暂未返回报告内容。"
-      : "任务完成后将在这里展示 Markdown 报告。";
+  preservePageScrollAfterRender(() => {
+    reportSection.classList.remove("hidden");
 
-    reportContent.innerHTML = `<div class="empty-block">${text}</div>`;
-    currentReportMarkdown = "";
-    reportDownloadPdfBtn.classList.add("hidden");
-    return;
-  }
+    if (!report || !report.markdown_content) {
+      const text = taskStatusValue === "succeeded"
+        ? "任务已完成，但后端暂未返回报告内容。"
+        : "任务完成后将在这里展示 Markdown 报告。";
 
-  currentReportMarkdown = report.markdown_content;
-  reportContent.innerHTML = simpleMarkdownToHtml(report.markdown_content);
-  reportDownloadPdfBtn.classList.remove("hidden");
+      reportContent.innerHTML = `<div class="empty-block">${text}</div>`;
+      currentReportMarkdown = "";
+      currentReportRawMarkdown = "";
+      reportDownloadPdfBtn.classList.add("hidden");
+      return;
+    }
+
+    const parsedReport = splitThinkContent(report.markdown_content);
+    currentReportMarkdown = parsedReport.body;
+    currentReportRawMarkdown = report.markdown_content;
+    reportContent.innerHTML = simpleMarkdownToHtml(parsedReport.body);
+    reportDownloadPdfBtn.classList.remove("hidden");
+  });
 }
 
 function renderLiveReport(markdown) {
-  currentReportMarkdown = markdown || "";
-  reportContent.innerHTML = currentReportMarkdown
-    ? simpleMarkdownToHtml(currentReportMarkdown)
-    : `<div class="empty-block">正在生成报告...</div>`;
-  reportDownloadPdfBtn.classList.add("hidden");
+  preservePageScrollAfterRender(() => {
+    reportSection.classList.remove("hidden");
+    currentReportMarkdown = markdown || "";
+    reportContent.innerHTML = currentReportMarkdown
+      ? simpleMarkdownToHtml(currentReportMarkdown)
+      : `<div class="empty-block">正在生成报告...</div>`;
+    reportDownloadPdfBtn.classList.add("hidden");
+  });
 }
 
 function updateStreamingReport(data) {
-  reportSection.classList.remove("hidden");
+  let rawMarkdown = currentReportRawMarkdown;
 
   if (data.type === "agent_delta" && data.delta) {
-    renderLiveReport(`${currentReportMarkdown}${data.delta}`);
-    return;
+    rawMarkdown += data.delta;
+  } else if (data.summary) {
+    rawMarkdown = data.summary;
   }
 
-  if (data.summary) {
-    renderLiveReport(data.summary);
-    return;
-  }
-
-  renderLiveReport(currentReportMarkdown);
+  currentReportRawMarkdown = rawMarkdown;
+  const parsed = splitThinkContent(currentReportRawMarkdown);
+  renderLiveReport(parsed.body);
+  return parsed;
 }
 
 function downloadReportPdf() {
@@ -1313,16 +1537,18 @@ async function handleTaskEvent(event) {
     return;
   }
 
+  const eventNode = data.node || data.nodes || "";
+
   if (data.type === "node_started") {
     updateTaskHeaderStatus("running", data.summary || data.title || "节点开始执行。");
-    if (data.node === "report_writer") {
+    if (eventNode === "report_writer") {
       renderLiveReport(currentReportMarkdown);
     }
-    upsertLiveStep(data.node, {
+    upsertLiveStep(eventNode, {
       step_number: data.step_number,
       status: "running",
       step_title: data.title,
-      output_summary: data.node === "report_writer"
+      output_summary: eventNode === "report_writer"
         ? REPORT_WRITER_PROGRESS_TEXT
         : data.summary || data.title || "",
     });
@@ -1330,31 +1556,33 @@ async function handleTaskEvent(event) {
   }
 
   if (data.type === "agent_delta" || data.type === "agent_message") {
-    if (data.node === "report_writer") {
-      updateStreamingReport(data);
-      upsertLiveStep(data.node, {
+    if (eventNode === "report_writer") {
+      const parsedReportStream = updateStreamingReport(data);
+      upsertLiveStep(eventNode, {
         step_number: data.step_number,
         status: "running",
         step_title: data.title,
+        thought_summary: parsedReportStream?.thought || "",
         output_summary: REPORT_WRITER_PROGRESS_TEXT,
       });
       return;
     }
-    upsertLiveStep(data.node, {
+    upsertLiveStep(eventNode, {
       step_number: data.step_number,
       status: "running",
       step_title: data.title,
-      output_summary: data.summary || "",
+      agent_stream_text: data.summary || "",
+      agent_stream_delta: data.summary ? "" : data.delta || "",
     });
     return;
   }
 
   if (data.type === "node_finished") {
-    upsertLiveStep(data.node, {
+    upsertLiveStep(eventNode, {
       step_number: data.step_number,
       status: "succeeded",
       step_title: data.title,
-      output_summary: data.node === "report_writer"
+      output_summary: eventNode === "report_writer"
         ? REPORT_WRITER_PROGRESS_TEXT
         : data.summary || "",
       output_json: data.output || null,
@@ -1364,7 +1592,7 @@ async function handleTaskEvent(event) {
 
   if (data.type === "node_failed") {
     updateTaskHeaderStatus("failed", data.error || "节点执行失败。");
-    upsertLiveStep(data.node, {
+    upsertLiveStep(eventNode, {
       step_number: data.step_number,
       status: "failed",
       step_title: data.title,
@@ -1441,6 +1669,19 @@ function upsertLiveStep(nodeName, patch) {
     step_title: stepTitle,
   };
   delete nextStep.step_number;
+
+  if ("agent_stream_text" in patch || "agent_stream_delta" in patch) {
+    const previousStep = existingIndex >= 0 ? liveTaskSteps[existingIndex] : null;
+    const rawStreamText = patch.agent_stream_text
+      ? String(patch.agent_stream_text)
+      : `${previousStep?.agent_stream_text || ""}${patch.agent_stream_delta || ""}`;
+    const parsedStream = splitThinkContent(rawStreamText);
+
+    nextStep.agent_stream_text = rawStreamText;
+    nextStep.thought_summary = parsedStream.thought;
+    nextStep.output_summary = parsedStream.body;
+    delete nextStep.agent_stream_delta;
+  }
 
   if (existingIndex >= 0) {
     liveTaskSteps[existingIndex] = nextStep;

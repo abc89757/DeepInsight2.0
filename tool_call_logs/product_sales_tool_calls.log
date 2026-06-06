@@ -15,3 +15,17 @@
 2026-05-31T22:54:50 [get_rows] file_path=/home/user/Projects/task_manager/data/car_sell.csv, filter=None:None, sort=None:desc
 2026-05-31T22:54:50 [get_rows] error=文件不存在：/home/user/Projects/task_manager/data/car_sell.csv
 2026-06-02T19:49:23 [get_rows] file_path=outputs\b5c44a47efc949e2ae139f67acebfd0a\q001_result.csv, filter=None:None, sort=None:desc
+2026-06-04T12:41:02 [get_rows] file_path=outputs/fa1d72ed83cf428f86d2c94e8d3723f2/q001_result.csv, filter=None:None, sort=None:desc
+2026-06-04T12:41:06 [get_rows] file_path=outputs/fa1d72ed83cf428f86d2c94e8d3723f2/q001_result.csv, filter=None:None, sort=None:desc
+2026-06-04T14:57:57 [get_rows] file_path=outputs\0e8822b48f5345a19c1588d8dcb880e5\q001_result.csv, filter=None:None, sort=None:desc
+2026-06-04T20:19:07 [get_rows] file_path=outputs\a69479f366464bf088e67af62c662f31\q001_result.csv, filter=None:None, sort=None:desc
+2026-06-04T20:19:14 [get_rows] file_path=outputs\a69479f366464bf088e67af62c662f31\q001_result.csv, filter=None:None, sort=None:desc
+2026-06-04T20:19:20 [get_rows] file_path=outputs\a69479f366464bf088e67af62c662f31\q001_result.csv, filter=None:None, sort=None:desc
+2026-06-05T12:33:49 [get_rows] file_path=outputs\db42773531e84aa2b810cb96865a4f6a\q001_result.csv, filter=None:None, sort=sales_count:desc
+2026-06-05T12:33:54 [get_rows] file_path=outputs\db42773531e84aa2b810cb96865a4f6a\q001_result.csv, filter=None:None, sort=sales_count:desc
+2026-06-05T13:37:22 [get_rows] file_path=outputs\19109cee416e4a2f8f4feda36776467d\q001_result.csv, filter=None:None, sort=transaction_count:desc
+2026-06-05T13:37:28 [get_rows] file_path=outputs\19109cee416e4a2f8f4feda36776467d\q001_result.csv, filter=None:None, sort=transaction_count:desc
+2026-06-05T13:37:50 [profile_value_ratio] file_path=outputs\19109cee416e4a2f8f4feda36776467d\q001_result.csv, column_name=make, top_n=20
+2026-06-05T13:37:58 [add_columns_sum] file_path=outputs\19109cee416e4a2f8f4feda36776467d\q001_result.csv, transaction_count+transaction_count->temp_sum
+2026-06-05T17:57:08 [get_rows] file_path=outputs\99a6fc3ffaf94d95b4e76394e9cdaa6a\q001_result.csv, filter=None:None, sort=sales_volume:desc
+2026-06-05T17:57:20 [get_rows] file_path=outputs\99a6fc3ffaf94d95b4e76394e9cdaa6a\q001_result.csv, filter=None:None, sort=sales_volume:desc
